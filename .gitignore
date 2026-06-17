@@ -19,3 +19,6 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# ===== dev.sh 런타임 (PID/로그) =====
+.run/
