@@ -1,0 +1,290 @@
+/* 전체 기본 스타일 */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #f4f5f7;
+}
+
+/* 전체 레이아웃: 사이드바 + 채팅 영역 (좌우 배치) */
+.app {
+  display: flex;
+  height: 100vh;
+}
+
+/* ===== 사이드바 ===== */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: #1f2430;
+  color: #e6e8ec;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+
+.new-chat {
+  padding: 10px;
+  border: 1px solid #3a4150;
+  border-radius: 8px;
+  background: transparent;
+  color: #e6e8ec;
+  font-size: 0.95rem;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+.new-chat:hover {
+  background: #2a3140;
+}
+
+.convo-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 대화 목록 항목 */
+.convo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.convo-item:hover {
+  background: #2a3140;
+}
+
+.convo-item.active {
+  background: #34405a;
+}
+
+.convo-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 수정/삭제 버튼 묶음: 평소엔 숨기고, 항목에 호버하면 나타남 */
+.convo-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.convo-item:hover .convo-actions {
+  opacity: 1;
+}
+
+.convo-btn {
+  border: none;
+  background: transparent;
+  color: #9aa1ac;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 3px;
+}
+
+.convo-delete {
+  font-size: 1.1rem;
+}
+
+.convo-delete:hover {
+  color: #ff6b6b;
+}
+
+/* 제목 편집 입력창 */
+.convo-edit-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid #4a90e2;
+  border-radius: 6px;
+  background: #2a3140;
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+/* ===== 채팅 영역 ===== */
+.chat-container {
+  flex: 1;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 채팅 영역 상단: 제목 + 모델 드롭다운 */
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+h1 {
+  font-size: 1.4rem;
+}
+
+.model-select {
+  padding: 8px 10px;
+  border: 1px solid #cdd0d4;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.model-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 응답 대기 중 깜빡이는 점 */
+.typing {
+  opacity: 0.5;
+  animation: blink 1s ease-in-out infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.15;
+  }
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e3e5e8;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty {
+  color: #999;
+  text-align: center;
+  margin-top: 40px;
+}
+
+.message {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: #2563eb;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.message.bot {
+  align-self: flex-start;
+  background: #eef0f3;
+  color: #111;
+  border-bottom-left-radius: 4px;
+}
+
+/* ===== 마크다운 렌더링 (봇 메시지) ===== */
+/* 말풍선 안이라 첫/마지막 요소의 바깥 여백은 제거해 깔끔하게 */
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown p {
+  margin: 0.4em 0;
+}
+.markdown ul,
+.markdown ol {
+  margin: 0.4em 0;
+  padding-left: 1.3em;
+}
+
+/* 인라인 코드 */
+.markdown code {
+  background: #dfe3e8;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* 코드 블록 */
+.markdown pre {
+  background: #1f2430;
+  color: #e6e8ec;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.markdown pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+/* 표 */
+.markdown table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid #c4c8cd;
+  padding: 4px 8px;
+}
+
+.markdown a {
+  color: #2563eb;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.input-row input {
+  flex: 1;
+  padding: 12px 14px;
+  border: 1px solid #cdd0d4;
+  border-radius: 10px;
+  font-size: 1rem;
+}
+
+.input-row button {
+  padding: 0 20px;
+  border: none;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.input-row button:disabled {
+  background: #9db4ec;
+  cursor: not-allowed;
+}

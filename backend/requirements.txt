@@ -1,0 +1,14 @@
+# FastAPI 웹 프레임워크
+fastapi==0.115.6
+# ASGI 서버 (FastAPI 앱을 실제로 실행). [standard]는 자동 리로드 등 편의 기능 포함
+uvicorn[standard]==0.34.0
+# HuggingFace API 호출용 비동기 HTTP 클라이언트
+httpx==0.28.1
+# .env 파일에서 환경변수를 읽어오기 위한 라이브러리
+python-dotenv==1.0.1
+# ORM(객체-관계 매핑): 파이썬 객체로 DB를 다루게 해준다. DB 종류와 독립적인 코드 작성 가능
+SQLAlchemy==2.0.36
+# MySQL 드라이버 (순수 파이썬이라 별도 빌드 불필요)
+PyMySQL==1.1.1
+# MySQL 8.x 기본 인증(caching_sha2_password)에 필요
+cryptography==44.0.0

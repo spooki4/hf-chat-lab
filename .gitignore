@@ -1,0 +1,21 @@
+# ===== 환경변수 / 비밀값 (절대 커밋 금지) =====
+.env
+*.env
+!*.env.example
+
+# ===== Python / 백엔드 =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# ===== Node / 프론트엔드 =====
+node_modules/
+dist/
+.vite/
+
+# ===== OS / 에디터 =====
+.DS_Store
+.vscode/
+.idea/
