@@ -3,11 +3,19 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm"; // 표, 체크리스트 등 GitHub 스타일 마크다운 지원
 import rehypeHighlight from "rehype-highlight"; // 코드블록 문법 하이라이트
 import "highlight.js/styles/github-dark.css"; // 하이라이트 다크 테마
+import Login from "./Login"; // 로그인/회원가입 화면
 
 // 백엔드 주소. .env(VITE_API_URL)로 바꿀 수 있고, 없으면 로컬 기본값을 쓴다.
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+// 로그인 토큰을 브라우저에 저장할 때 쓰는 key (새로고침해도 로그인 유지)
+const TOKEN_KEY = "hf_chat_token";
+
 export default function App() {
+  // token: 로그인 토큰(JWT). 없으면 로그인 화면을 보여준다. (localStorage에서 초기화)
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
+  // userEmail: 현재 로그인한 사용자 이메일 (사이드바 표시용)
+  const [userEmail, setUserEmail] = useState("");
   // conversations: 사이드바에 보여줄 대화 목록 [{ id, title }, ...]
   const [conversations, setConversations] = useState([]);
   // activeId: 현재 열려있는 대화의 id (null이면 "새 대화" 상태)
@@ -31,17 +39,66 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  // 앱이 처음 뜰 때 대화 목록과 모델 목록을 불러온다.
+  // 로그인 상태(token)가 생기면: 토큰 유효성 확인 + 대화/모델 목록 로드.
+  // (새로고침으로 localStorage 토큰만 남아있는 경우에도 여기서 검증한다)
   useEffect(() => {
-    loadConversations();
-    loadModels();
-  }, []);
+    if (!token) return;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("토큰 만료");
+        const u = await res.json();
+        setUserEmail(u.email);
+        loadConversations();
+        loadModels();
+      } catch {
+        handleLogout(); // 토큰이 만료/무효면 로그아웃 처리
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // --- 인증 헬퍼 -------------------------------------------------------------
+
+  // 로그인/회원가입 성공 시: 토큰을 저장하고 화면을 채팅으로 전환한다.
+  function handleAuth(newToken, email) {
+    localStorage.setItem(TOKEN_KEY, newToken);
+    setToken(newToken);
+    setUserEmail(email);
+  }
+
+  // 로그아웃: 토큰을 지우고 모든 화면 상태를 초기화한다.
+  function handleLogout() {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken("");
+    setUserEmail("");
+    setConversations([]);
+    setMessages([]);
+    setActiveId(null);
+  }
+
+  // 인증이 필요한 API 호출용 공용 래퍼.
+  // - 자동으로 Authorization 헤더를 붙인다.
+  // - 토큰이 만료/무효(401)면 자동 로그아웃시킨다.
+  async function apiFetch(path, options = {}) {
+    const res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      handleLogout();
+      throw new Error("로그인이 필요합니다. 다시 로그인해 주세요.");
+    }
+    return res;
+  }
 
   // --- API 호출 함수들 -------------------------------------------------------
 
   async function loadConversations() {
     try {
-      const res = await fetch(`${API_URL}/conversations`);
+      const res = await apiFetch("/conversations");
       setConversations(await res.json());
     } catch {
       // 백엔드가 아직 안 떠 있을 수 있으니 조용히 무시
@@ -63,7 +120,7 @@ export default function App() {
   async function selectConversation(id) {
     setActiveId(id);
     try {
-      const res = await fetch(`${API_URL}/conversations/${id}/messages`);
+      const res = await apiFetch(`/conversations/${id}/messages`);
       setMessages(await res.json());
     } catch {
       setMessages([]);
@@ -80,7 +137,7 @@ export default function App() {
   // 새 대화의 제목을 모델로 자동 생성하고, 끝나면 사이드바를 갱신한다.
   async function generateTitle(id) {
     try {
-      await fetch(`${API_URL}/conversations/${id}/title`, { method: "POST" });
+      await apiFetch(`/conversations/${id}/title`, { method: "POST" });
     } catch {
       // 제목 생성 실패는 치명적이지 않으니 무시 (기본 제목 유지)
     } finally {
@@ -106,7 +163,7 @@ export default function App() {
     // 비었거나 그대로면 저장 없이 종료
     if (!title) return cancelEdit();
     try {
-      await fetch(`${API_URL}/conversations/${id}`, {
+      await apiFetch(`/conversations/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),
@@ -128,7 +185,7 @@ export default function App() {
   async function deleteConversation(id, e) {
     e.stopPropagation(); // 삭제 버튼 클릭이 대화 선택으로 번지지 않게
     if (!confirm("이 대화를 삭제할까요?")) return;
-    await fetch(`${API_URL}/conversations/${id}`, { method: "DELETE" });
+    await apiFetch(`/conversations/${id}`, { method: "DELETE" });
     if (id === activeId) startNewChat(); // 보고 있던 대화면 화면 비우기
     loadConversations();
   }
@@ -170,7 +227,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/chat/stream`, {
+      const res = await apiFetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -236,7 +293,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/chat/stream/regenerate`, {
+      const res = await apiFetch("/chat/stream/regenerate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -259,6 +316,12 @@ export default function App() {
   }
 
   // --- 화면 -----------------------------------------------------------------
+
+  // 로그인하지 않았으면 채팅 대신 로그인/회원가입 화면을 보여준다.
+  if (!token) {
+    return <Login onAuth={handleAuth} />;
+  }
+
   return (
     <div className="app">
       {/* 왼쪽: 대화 목록 사이드바 */}
@@ -307,6 +370,16 @@ export default function App() {
               </div>
             )
           )}
+        </div>
+
+        {/* 사이드바 하단: 로그인한 사용자 + 로그아웃 */}
+        <div className="user-bar">
+          <span className="user-email" title={userEmail}>
+            {userEmail}
+          </span>
+          <button className="logout-btn" onClick={handleLogout} title="로그아웃">
+            로그아웃
+          </button>
         </div>
       </aside>
 

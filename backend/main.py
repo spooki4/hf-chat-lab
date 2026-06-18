@@ -10,8 +10,11 @@ FastAPI 백엔드 - HuggingFace 챗봇 (대화 기록 저장 + 멀티턴)
 
 엔드포인트:
   GET  /                              헬스 체크
+  POST /auth/register                 회원가입 → 토큰 발급
+  POST /auth/login                    로그인 → 토큰 발급
+  GET  /auth/me                       현재 로그인한 사용자 정보
   GET  /models                        선택 가능한 모델 목록 (드롭다운용)
-  GET  /conversations                 대화 목록 (사이드바용)
+  GET  /conversations                 대화 목록 (사이드바용, 로그인 사용자 것만)
   POST /conversations                 새 대화 생성
   GET  /conversations/{id}/messages   특정 대화의 메시지 전체
   DELETE /conversations/{id}          대화 삭제
@@ -32,8 +35,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from auth import (
+    create_access_token,
+    get_current_user,
+    hash_password,
+    verify_password,
+)
 from database import Base, SessionLocal, engine, get_db
-from models import Conversation, Message
+from models import Conversation, Message, User
 
 load_dotenv()
 
@@ -195,6 +204,31 @@ class TitleUpdate(BaseModel):
     title: str  # 사용자가 직접 입력한 새 제목
 
 
+# 회원가입/로그인 요청 본문
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+# 로그인 성공 시 돌려주는 토큰 + 사용자 정보
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    email: str
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+
+    model_config = {"from_attributes": True}
+
+
 # --- 공용 헬퍼 ---------------------------------------------------------------
 def build_history(convo: Conversation) -> list[dict]:
     """
@@ -214,6 +248,17 @@ def build_history(convo: Conversation) -> list[dict]:
         role = "assistant" if m.role == "bot" else "user"
         history.append({"role": role, "content": m.content})
     return history
+
+
+def get_owned_conversation(db: Session, convo_id: int, user: User) -> Conversation:
+    """
+    convo_id 대화를 가져오되 '현재 사용자 소유'인지 확인한다.
+    남의 대화면 존재 자체를 숨기기 위해 404로 응답한다(403 대신).
+    """
+    convo = db.get(Conversation, convo_id)
+    if not convo or convo.user_id != user.id:
+        raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다.")
+    return convo
 
 
 def require_token():
@@ -374,16 +419,66 @@ async def list_models():
     return {"models": models, "default": pick_default(models)}
 
 
+@app.post("/auth/register", response_model=TokenResponse)
+def register(body: RegisterRequest, db: Session = Depends(get_db)):
+    """회원가입: 이메일+비밀번호로 사용자를 만들고 바로 로그인 토큰을 발급한다."""
+    email = body.email.strip().lower()
+    if not email or not body.password:
+        raise HTTPException(status_code=400, detail="이메일과 비밀번호를 입력하세요.")
+    if len(body.password) < 4:
+        raise HTTPException(status_code=400, detail="비밀번호는 4자 이상이어야 합니다.")
+
+    # 이미 가입된 이메일인지 확인 (users.email 은 unique)
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=409, detail="이미 가입된 이메일입니다.")
+
+    user = User(email=email, password_hash=hash_password(body.password))
+    db.add(user)
+    db.commit()
+    db.refresh(user)  # DB가 채워준 id 확보
+
+    token = create_access_token(user.id)
+    return TokenResponse(access_token=token, email=user.email)
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+def login(body: LoginRequest, db: Session = Depends(get_db)):
+    """로그인: 이메일/비밀번호가 맞으면 토큰을 발급한다."""
+    email = body.email.strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    # 사용자 없음/비밀번호 불일치 모두 같은 메시지로 응답(어느 쪽이 틀렸는지 흘리지 않음)
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
+
+    token = create_access_token(user.id)
+    return TokenResponse(access_token=token, email=user.email)
+
+
+@app.get("/auth/me", response_model=UserOut)
+def me(current_user: User = Depends(get_current_user)):
+    """현재 로그인한 사용자 정보 반환 (프론트가 토큰 유효성 확인 + 이메일 표시에 사용)."""
+    return current_user
+
+
 @app.get("/conversations", response_model=list[ConversationOut])
-def list_conversations(db: Session = Depends(get_db)):
-    """대화 목록을 최신순으로 반환 (프론트 사이드바용)."""
-    return db.query(Conversation).order_by(Conversation.id.desc()).all()
+def list_conversations(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    """현재 사용자의 대화 목록을 최신순으로 반환 (프론트 사이드바용)."""
+    return (
+        db.query(Conversation)
+        .filter(Conversation.user_id == current_user.id)
+        .order_by(Conversation.id.desc())
+        .all()
+    )
 
 
 @app.post("/conversations", response_model=ConversationOut)
-def create_conversation(db: Session = Depends(get_db)):
-    """빈 대화방을 새로 만든다."""
-    convo = Conversation(title="새 대화")
+def create_conversation(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    """현재 사용자 소유의 빈 대화방을 새로 만든다."""
+    convo = Conversation(title="새 대화", user_id=current_user.id)
     db.add(convo)
     db.commit()
     db.refresh(convo)  # DB가 채워준 id 등을 객체에 반영
@@ -391,20 +486,24 @@ def create_conversation(db: Session = Depends(get_db)):
 
 
 @app.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
-def get_messages(conversation_id: int, db: Session = Depends(get_db)):
+def get_messages(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """특정 대화의 메시지를 시간순으로 반환 (대화 클릭 시 불러오기)."""
-    convo = db.get(Conversation, conversation_id)
-    if not convo:
-        raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다.")
+    convo = get_owned_conversation(db, conversation_id, current_user)
     return convo.messages  # models.py에서 id순 정렬되도록 설정해둠
 
 
 @app.post("/conversations/{conversation_id}/title", response_model=ConversationOut)
-async def make_title(conversation_id: int, db: Session = Depends(get_db)):
+async def make_title(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """대화의 첫 사용자 메시지로 제목을 자동 생성해 저장한다."""
-    convo = db.get(Conversation, conversation_id)
-    if not convo:
-        raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다.")
+    convo = get_owned_conversation(db, conversation_id, current_user)
 
     # 첫 사용자 메시지를 찾는다.
     first_user = next((m.content for m in convo.messages if m.role == "user"), "")
@@ -417,12 +516,13 @@ async def make_title(conversation_id: int, db: Session = Depends(get_db)):
 
 @app.patch("/conversations/{conversation_id}", response_model=ConversationOut)
 def rename_conversation(
-    conversation_id: int, body: TitleUpdate, db: Session = Depends(get_db)
+    conversation_id: int,
+    body: TitleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """대화 제목을 사용자가 직접 수정한다."""
-    convo = db.get(Conversation, conversation_id)
-    if not convo:
-        raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다.")
+    convo = get_owned_conversation(db, conversation_id, current_user)
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="제목이 비어 있습니다.")
@@ -432,29 +532,34 @@ def rename_conversation(
 
 
 @app.delete("/conversations/{conversation_id}")
-def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
+def delete_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """대화 삭제 (속한 메시지도 cascade로 함께 삭제)."""
-    convo = db.get(Conversation, conversation_id)
-    if not convo:
-        raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다.")
+    convo = get_owned_conversation(db, conversation_id, current_user)
     db.delete(convo)
     db.commit()
     return {"deleted": conversation_id}
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, db: Session = Depends(get_db)):
+async def chat(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     메시지를 받아 (필요시 대화 생성) 저장하고,
     이전 맥락과 함께 모델을 호출한 뒤 응답을 저장/반환한다.
     """
-    # 1) 대화방 확보: ID가 오면 그걸 쓰고, 없으면 새로 만든다.
+    # 1) 대화방 확보: ID가 오면 '내 대화인지' 확인 후 사용, 없으면 새로 만든다.
     if req.conversation_id is not None:
-        convo = db.get(Conversation, req.conversation_id)
-        if not convo:
-            raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다.")
+        convo = get_owned_conversation(db, req.conversation_id, current_user)
     else:
-        convo = Conversation(title=req.message[:30])  # 첫 메시지 앞부분을 제목으로
+        # 첫 메시지 앞부분을 제목으로, 소유자는 현재 사용자
+        convo = Conversation(title=req.message[:30], user_id=current_user.id)
         db.add(convo)
         db.flush()  # commit 전에 id를 먼저 확보
 
@@ -479,7 +584,9 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/chat/stream")
-async def chat_stream(req: ChatRequest):
+async def chat_stream(
+    req: ChatRequest, current_user: User = Depends(get_current_user)
+):
     """
     /chat 과 동작은 같지만, 응답을 '토큰 단위로 흘려보낸다'(스트리밍).
     프론트는 받는 즉시 화면에 이어붙여 타이핑 효과를 낸다.
@@ -494,14 +601,14 @@ async def chat_stream(req: ChatRequest):
     require_token()
     db = SessionLocal()
 
-    # 1) 대화방 확보
+    # 1) 대화방 확보 ('내 대화'인지 확인, 없으면 현재 사용자 소유로 생성)
     if req.conversation_id is not None:
         convo = db.get(Conversation, req.conversation_id)
-        if not convo:
+        if not convo or convo.user_id != current_user.id:
             db.close()
             raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다.")
     else:
-        convo = Conversation(title=req.message[:30])
+        convo = Conversation(title=req.message[:30], user_id=current_user.id)
         db.add(convo)
         db.flush()
 
@@ -521,7 +628,9 @@ async def chat_stream(req: ChatRequest):
 
 
 @app.post("/chat/stream/regenerate")
-async def regenerate_stream(req: RegenerateRequest):
+async def regenerate_stream(
+    req: RegenerateRequest, current_user: User = Depends(get_current_user)
+):
     """
     '응답 재생성': 마지막 봇 답변을 버리고, 같은 질문(맥락)으로 새 답변을 다시 스트리밍한다.
 
@@ -534,7 +643,7 @@ async def regenerate_stream(req: RegenerateRequest):
     db = SessionLocal()
 
     convo = db.get(Conversation, req.conversation_id)
-    if not convo:
+    if not convo or convo.user_id != current_user.id:
         db.close()
         raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다.")
 

@@ -104,6 +104,40 @@ body {
   color: #ff6b6b;
 }
 
+/* 사이드바 하단 사용자 영역 (이메일 + 로그아웃) */
+.user-bar {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #3a4150;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.user-email {
+  font-size: 0.8rem;
+  color: #9aa1ac;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-btn {
+  flex-shrink: 0;
+  border: 1px solid #3a4150;
+  background: transparent;
+  color: #e6e8ec;
+  font-size: 0.78rem;
+  padding: 5px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.logout-btn:hover {
+  background: #2a3140;
+}
+
 /* 제목 편집 입력창 */
 .convo-edit-input {
   width: 100%;

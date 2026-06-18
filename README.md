@@ -19,13 +19,15 @@ HuggingFace 무료 모델을 사용하는 학습용 AI 챗봇 웹앱.
 - 📋 메시지 복사: 봇 응답을 클립보드로 한 번에 복사
 - 🔄 응답 재생성: 마지막 답변을 같은 질문으로 다시 생성
 - ✂️ 토큰 절약: 긴 대화는 최근 N개 메시지만 모델에 전달 (`HISTORY_WINDOW`)
+- 🔐 사용자 인증: 이메일/비밀번호 회원가입·로그인(JWT), 사용자별 대화 분리
 
 ```
 hf-chat-lab/
 ├── backend/      # FastAPI + HuggingFace + DB
 │   ├── main.py          # API 엔드포인트
+│   ├── auth.py          # 비밀번호 해싱 + JWT + 현재 사용자 판별
 │   ├── database.py      # DB 연결 설정
-│   ├── models.py        # 테이블 정의 (conversations, messages)
+│   ├── models.py        # 테이블 정의 (users, conversations, messages)
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/     # React (Vite)
@@ -107,6 +109,10 @@ cp .env.example .env
 
 ```
 HF_TOKEN=hf_본인의_실제_토큰
+
+# 로그인 토큰(JWT) 서명용 비밀키 — 길고 무작위인 값으로 설정
+# 생성 예) python -c "import secrets; print(secrets.token_hex(32))"
+JWT_SECRET=무작위_긴_문자열
 
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -190,16 +196,25 @@ npm run dev
 | 응답이 느림 | 무료 모델 cold start. 잠시 후 재시도 |
 | `Access denied` / `Can't connect` (DB) | `DATABASE_URL`의 비밀번호/포트 확인, 특수문자 인코딩(`@`→`%40`), MySQL 실행 여부 확인 |
 | `Unknown database 'hf_chat_lab'` | `0-2. DB 준비` 단계의 `CREATE DATABASE` 를 실행했는지 확인 |
+| 401 / `로그인이 필요합니다` | 토큰 만료/무효. 다시 로그인하세요. (로그아웃 시 토큰 삭제됨) |
+| `로그인이 만료되었습니다` | JWT 유효기간(기본 7일) 경과. 재로그인하면 됩니다. |
+| `Unknown column 'user_id'` 등 스키마 오류 | 인증 도입으로 테이블 구조가 바뀜. 기존 `conversations`/`messages` 테이블을 지우면 서버 재시작 시 새 스키마로 재생성됩니다. |
 
 ---
 
 ## API 엔드포인트 요약
 
+> `/auth/*`를 제외한 대화/채팅 엔드포인트는 모두 **로그인 필요**합니다.
+> 프론트는 로그인 시 받은 토큰을 `Authorization: Bearer <토큰>` 헤더로 보냅니다.
+
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
 | GET | `/` | 헬스 체크 |
+| POST | `/auth/register` | 회원가입 (`{email, password}`) → 토큰 발급 |
+| POST | `/auth/login` | 로그인 (`{email, password}`) → 토큰 발급 |
+| GET | `/auth/me` | 현재 로그인한 사용자 정보 |
 | GET | `/models` | 선택 가능한 모델 목록 (드롭다운용) |
-| GET | `/conversations` | 대화 목록 |
+| GET | `/conversations` | 내 대화 목록 |
 | POST | `/conversations` | 새 대화 생성 |
 | GET | `/conversations/{id}/messages` | 특정 대화의 메시지 전체 |
 | POST | `/conversations/{id}/title` | 첫 메시지로 대화 제목 자동 생성 |
@@ -218,7 +233,7 @@ npm run dev
 
 - ✅ ~~멀티턴~~ · ~~기록 저장~~ · ~~스트리밍~~ · ~~모델 선택~~ · ~~마크다운+하이라이트~~ · ~~제목 자동생성/수정~~ — 완료!
 - ✅ ~~긴 대화 토큰 절약 (최근 N개만 전송)~~ · ~~메시지 복사 버튼~~ · ~~응답 재생성~~ — 완료!
-- 사용자 인증(로그인)으로 사용자별 대화 분리
+- ✅ ~~사용자 인증(JWT 로그인)으로 사용자별 대화 분리~~ — 완료!
 
 > **(선택) 토큰 절약 고도화 — 오래된 대화 '요약' 압축**
 > 윈도우(최근 N개) 밖으로 밀려난 옛 메시지를 모델로 요약해 system에 합쳐 전달하는 방식.

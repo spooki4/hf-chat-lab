@@ -12,3 +12,7 @@ SQLAlchemy==2.0.36
 PyMySQL==1.1.1
 # MySQL 8.x 기본 인증(caching_sha2_password)에 필요
 cryptography==44.0.0
+# JWT(JSON Web Token) 발급/검증 — 로그인 토큰에 사용
+PyJWT==2.10.1
+# 비밀번호 해싱(단방향 암호화). DB에는 해시만 저장한다.
+bcrypt==4.2.1
