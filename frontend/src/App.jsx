@@ -22,6 +22,8 @@ export default function App() {
   // 제목 편집 상태: editingId = 편집 중인 대화 id(없으면 null), editingText = 입력값
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState("");
+  // copiedIndex: 방금 '복사됨 ✓'을 보여줄 메시지의 인덱스 (없으면 null)
+  const [copiedIndex, setCopiedIndex] = useState(null);
 
   // 새 메시지가 추가되면 맨 아래로 스크롤
   const bottomRef = useRef(null);
@@ -131,6 +133,27 @@ export default function App() {
     loadConversations();
   }
 
+  // --- 스트림 읽기 공용 헬퍼 --------------------------------------------------
+  // 응답 본문을 토큰 단위로 읽으며 messages의 '마지막 봇 말풍선'에 이어붙인다.
+  // (전송/재생성 두 곳에서 같은 방식으로 화면을 갱신하므로 함수로 분리)
+  async function readStreamIntoLastBubble(res) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let acc = ""; // 지금까지 받은 전체 텍스트
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      acc += decoder.decode(value, { stream: true });
+      // messages의 마지막 항목(봇 메시지)만 갱신 → 타이핑 효과
+      setMessages((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = { role: "bot", content: acc };
+        return next;
+      });
+    }
+    return acc;
+  }
+
   // --- 메시지 전송 (스트리밍) -------------------------------------------------
   async function sendMessage(e) {
     e.preventDefault();
@@ -163,27 +186,67 @@ export default function App() {
       const newId = Number(res.headers.get("X-Conversation-Id"));
 
       // 응답 본문을 스트림으로 읽으며 마지막 봇 메시지에 이어붙인다.
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let acc = ""; // 지금까지 받은 전체 텍스트
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
-        // messages의 마지막 항목(봇 메시지)만 갱신 → 타이핑 효과
-        setMessages((prev) => {
-          const next = [...prev];
-          next[next.length - 1] = { role: "bot", content: acc };
-          return next;
-        });
-      }
+      await readStreamIntoLastBubble(res);
 
       // 새 대화였다면 id 활성화 + 제목 자동 생성(끝나면 사이드바 갱신)
       if (activeId === null && newId) {
         setActiveId(newId);
         generateTitle(newId);
       }
+    } catch (err) {
+      setMessages((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = { role: "bot", content: `⚠️ 오류: ${err.message}` };
+        return next;
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // --- 메시지 복사 -----------------------------------------------------------
+  // 봇 응답 원문(마크다운 그대로)을 클립보드에 복사하고, 잠깐 '복사됨 ✓'을 보여준다.
+  async function copyMessage(content, index) {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedIndex(index);
+      // 1.5초 뒤 표시 해제 (그 사이 다른 메시지를 복사했으면 그대로 둔다)
+      setTimeout(
+        () => setCopiedIndex((cur) => (cur === index ? null : cur)),
+        1500
+      );
+    } catch {
+      // clipboard API는 보안 컨텍스트(https/localhost)에서만 동작 → 실패 시 조용히 무시
+    }
+  }
+
+  // --- 응답 재생성 -----------------------------------------------------------
+  // 마지막 봇 답변을 버리고 같은 질문으로 다시 생성한다. (백엔드가 마지막 봇 메시지를 삭제 후 재호출)
+  async function regenerate() {
+    if (loading || activeId === null) return;
+
+    // 화면의 마지막 봇 말풍선을 비워 새 응답을 받을 자리로 만든다.
+    setMessages((prev) => {
+      const next = [...prev];
+      if (next.length && next[next.length - 1].role === "bot") {
+        next[next.length - 1] = { role: "bot", content: "" };
+      }
+      return next;
+    });
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${API_URL}/chat/stream/regenerate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversation_id: activeId,
+          model: selectedModel, // 같은(현재 선택된) 모델로 재생성
+        }),
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+      await readStreamIntoLastBubble(res);
     } catch (err) {
       setMessages((prev) => {
         const next = [...prev];
@@ -271,29 +334,54 @@ export default function App() {
           {messages.length === 0 && (
             <p className="empty">메시지를 입력해 대화를 시작해보세요.</p>
           )}
-          {messages.map((m, i) => (
-            <div key={i} className={`message ${m.role}`}>
-              {m.role === "bot" ? (
-                // 봇 응답은 마크다운으로 렌더링 (코드블록/목록/표 등)
-                m.content ? (
-                  <div className="markdown">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[rehypeHighlight]}
-                    >
-                      {m.content}
-                    </ReactMarkdown>
-                  </div>
+          {messages.map((m, i) => {
+            const isLast = i === messages.length - 1; // 마지막 메시지인지
+            return (
+              <div key={i} className={`message ${m.role}`}>
+                {m.role === "bot" ? (
+                  // 봇 응답은 마크다운으로 렌더링 (코드블록/목록/표 등)
+                  m.content ? (
+                    <>
+                      <div className="markdown">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          rehypePlugins={[rehypeHighlight]}
+                        >
+                          {m.content}
+                        </ReactMarkdown>
+                      </div>
+                      {/* 봇 메시지 도구모음: 복사 + (마지막 답변에만) 재생성 */}
+                      <div className="msg-actions">
+                        <button
+                          className="msg-btn"
+                          onClick={() => copyMessage(m.content, i)}
+                          title="응답 복사"
+                        >
+                          {copiedIndex === i ? "복사됨 ✓" : "📋 복사"}
+                        </button>
+                        {/* 마지막 봇 답변이고, 스트리밍 중이 아니며, 저장된 대화일 때만 재생성 */}
+                        {isLast && !loading && activeId !== null && (
+                          <button
+                            className="msg-btn"
+                            onClick={regenerate}
+                            title="같은 질문으로 다시 생성"
+                          >
+                            🔄 재생성
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    // 스트리밍 중 아직 내용이 없으면 깜빡이는 표시
+                    <span className="typing">…</span>
+                  )
                 ) : (
-                  // 스트리밍 중 아직 내용이 없으면 깜빡이는 표시
-                  <span className="typing">…</span>
-                )
-              ) : (
-                // 사용자 입력은 안전하게 평문으로 표시
-                m.content
-              )}
-            </div>
-          ))}
+                  // 사용자 입력은 안전하게 평문으로 표시
+                  m.content
+                )}
+              </div>
+            );
+          })}
           <div ref={bottomRef} />
         </div>
 

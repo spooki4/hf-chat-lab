@@ -260,6 +260,36 @@ h1 {
   color: #2563eb;
 }
 
+/* ===== 봇 메시지 도구모음 (복사 / 재생성) ===== */
+/* 평소엔 흐리게 두고, 말풍선에 호버하면 또렷해진다 */
+.msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+
+.message.bot:hover .msg-actions {
+  opacity: 1;
+}
+
+.msg-btn {
+  border: 1px solid #d2d6dc;
+  background: #fff;
+  color: #444;
+  font-size: 0.78rem;
+  line-height: 1;
+  padding: 5px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.msg-btn:hover {
+  background: #f0f2f5;
+  border-color: #b9bec6;
+}
+
 .input-row {
   display: flex;
   gap: 8px;

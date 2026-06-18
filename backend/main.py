@@ -17,6 +17,7 @@ FastAPI 백엔드 - HuggingFace 챗봇 (대화 기록 저장 + 멀티턴)
   DELETE /conversations/{id}          대화 삭제
   POST /chat                          메시지 전송 → 모델 응답 (한 번에)
   POST /chat/stream                   메시지 전송 → 응답을 토큰 단위로 스트리밍
+  POST /chat/stream/regenerate        마지막 봇 답변을 버리고 같은 질문으로 다시 스트리밍
 """
 
 import json
@@ -50,6 +51,14 @@ FALLBACK_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 #   temperature: 낮을수록 일관적/안정적. (기본값 1.0은 작은 모델에서 응답이 무너지기 쉬움)
 CHAT_TEMPERATURE = 0.7
 CHAT_MAX_TOKENS = 512
+
+# 모델에 함께 보낼 '최근 메시지' 개수 상한 (토큰 절약용).
+#   대화가 길어질수록 전체 히스토리를 매번 보내면 토큰(=비용/사용량 한도)이 빠르게 늘어난다.
+#   그래서 system 프롬프트는 항상 유지하되, 그 외 메시지는 '최근 N개'만 모델에 전달한다.
+#   트레이드오프: 값이 작을수록 토큰은 아끼지만 오래된 맥락을 잊는다(멀티턴 기억이 짧아짐).
+#   주의: DB에는 항상 전체가 저장된다. 잘리는 것은 '모델에 보내는 입력'뿐이라 화면/기록엔 영향 없음.
+#   0 이하로 두면 제한 없이 전체를 전달한다(기존 동작).
+HISTORY_WINDOW = 10
 
 # 모델에게 주는 기본 지시(성격/규칙)
 SYSTEM_PROMPT = "You are a helpful assistant. 한국어로 친절하게 답하세요."
@@ -159,6 +168,13 @@ class ChatResponse(BaseModel):
     conversation_id: int  # 프론트가 이후 메시지를 같은 대화로 보낼 수 있게 돌려준다
 
 
+class RegenerateRequest(BaseModel):
+    # 어느 대화의 마지막 답변을 다시 만들지
+    conversation_id: int
+    # 재생성에 사용할 모델. 없으면 기본 모델 사용.
+    model: str | None = None
+
+
 class MessageOut(BaseModel):
     id: int
     role: str
@@ -187,7 +203,14 @@ def build_history(convo: Conversation) -> list[dict]:
     (이 목록을 통째로 모델에 보내는 것이 '멀티턴/맥락 기억'의 핵심)
     """
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for m in convo.messages:
+
+    msgs = list(convo.messages)
+    # 토큰 절약: system 프롬프트는 항상 두고, 나머지는 '최근 HISTORY_WINDOW개'만 사용.
+    # (HISTORY_WINDOW가 0 이하면 자르지 않고 전체를 보낸다)
+    if HISTORY_WINDOW > 0:
+        msgs = msgs[-HISTORY_WINDOW:]
+
+    for m in msgs:
         role = "assistant" if m.role == "bot" else "user"
         history.append({"role": role, "content": m.content})
     return history
@@ -255,6 +278,57 @@ async def call_hf(
         return data["choices"][0]["message"]["content"].strip()
     except (KeyError, IndexError):
         raise HTTPException(status_code=500, detail=f"예상치 못한 응답 형식: {data}")
+
+
+async def stream_chat_and_save(db: Session, convo_id: int, history: list[dict], model: str):
+    """
+    HF에 스트리밍 요청을 보내 토큰(delta)을 그대로 흘려보내고,
+    스트림이 끝나면 모은 전체 응답을 DB에 'bot' 메시지로 저장한 뒤 세션을 닫는다.
+
+    /chat/stream(새 응답)과 /chat/stream/regenerate(응답 재생성)가 공유하는 공통 로직.
+    호출 측에서 대화방 확보·사용자 메시지 저장을 끝낸 뒤, 이 제너레이터를
+    StreamingResponse에 넘겨주면 된다. (db 세션의 소유권도 이 함수가 넘겨받아 닫는다)
+    """
+    collected = []  # 전체 응답을 모아 마지막에 DB 저장용
+    payload = {
+        "model": model,
+        "messages": history,
+        "max_tokens": CHAT_MAX_TOKENS,
+        "temperature": CHAT_TEMPERATURE,  # 응답 안정성 향상
+        "stream": True,  # ← HF에 스트리밍 요청
+    }
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("POST", HF_API_URL, headers=headers, json=payload) as resp:
+                if resp.status_code != 200:
+                    body = (await resp.aread()).decode(errors="ignore")
+                    yield friendly_hf_error(resp.status_code, body, model)
+                    return
+                # HF는 SSE(Server-Sent Events) 형식으로 'data: {json}' 줄을 보낸다.
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[len("data:") :].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                        delta = obj["choices"][0]["delta"].get("content")
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+                    if delta:
+                        collected.append(delta)
+                        yield delta  # ← 받는 즉시 프론트로 전달
+    except httpx.RequestError as e:
+        yield f"⚠️ 연결 실패: {e}"
+    finally:
+        # 스트림 종료 후 전체 응답을 DB에 저장하고 세션 정리
+        full = "".join(collected).strip()
+        if full:
+            db.add(Message(conversation_id=convo_id, role="bot", content=full))
+            db.commit()
+        db.close()
 
 
 async def generate_title(first_user_message: str, model: str) -> str:
@@ -413,9 +487,9 @@ async def chat_stream(req: ChatRequest):
     구현 메모:
       - 대화방 확보/사용자 메시지 저장은 스트리밍 시작 '전에' 끝낸다.
         → 그래야 대화 ID를 응답 헤더(X-Conversation-Id)로 먼저 내려줄 수 있다.
-      - 모델 응답은 조각들을 모아 두었다가, 스트림이 끝나면 통째로 DB에 저장한다.
+      - 실제 스트리밍/DB 저장은 공용 헬퍼 stream_chat_and_save가 담당한다.
       - StreamingResponse 도중에도 DB 세션이 필요하므로, 의존성(get_db) 대신
-        세션을 직접 열고 제너레이터 끝에서 닫는다.
+        세션을 직접 열고 헬퍼가 제너레이터 끝에서 닫는다.
     """
     require_token()
     db = SessionLocal()
@@ -438,54 +512,49 @@ async def chat_stream(req: ChatRequest):
     history = build_history(convo)
     model = await resolve_model(req.model)
 
-    async def token_generator():
-        """HF 스트림에서 텍스트 조각(delta)을 받아 그대로 흘려보낸다."""
-        collected = []  # 전체 응답을 모아 마지막에 DB 저장용
-        payload = {
-            "model": model,
-            "messages": history,
-            "max_tokens": CHAT_MAX_TOKENS,
-            "temperature": CHAT_TEMPERATURE,  # 응답 안정성 향상
-            "stream": True,  # ← HF에 스트리밍 요청
-        }
-        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                async with client.stream(
-                    "POST", HF_API_URL, headers=headers, json=payload
-                ) as resp:
-                    if resp.status_code != 200:
-                        body = (await resp.aread()).decode(errors="ignore")
-                        yield friendly_hf_error(resp.status_code, body, model)
-                        return
-                    # HF는 SSE(Server-Sent Events) 형식으로 'data: {json}' 줄을 보낸다.
-                    async for line in resp.aiter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        data = line[len("data:") :].strip()
-                        if data == "[DONE]":
-                            break
-                        try:
-                            obj = json.loads(data)
-                            delta = obj["choices"][0]["delta"].get("content")
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
-                        if delta:
-                            collected.append(delta)
-                            yield delta  # ← 받는 즉시 프론트로 전달
-        except httpx.RequestError as e:
-            yield f"⚠️ 연결 실패: {e}"
-        finally:
-            # 3) 스트림 종료 후 전체 응답을 DB에 저장하고 세션 정리
-            full = "".join(collected).strip()
-            if full:
-                db.add(Message(conversation_id=convo_id, role="bot", content=full))
-                db.commit()
-            db.close()
-
-    # 대화 ID를 헤더로 먼저 알려준다(프론트가 새 대화 ID를 알 수 있게).
+    # 3) 대화 ID를 헤더로 먼저 알려주고(새 대화 ID 전달), 응답을 스트리밍한다.
     return StreamingResponse(
-        token_generator(),
+        stream_chat_and_save(db, convo_id, history, model),
+        media_type="text/plain; charset=utf-8",
+        headers={"X-Conversation-Id": str(convo_id)},
+    )
+
+
+@app.post("/chat/stream/regenerate")
+async def regenerate_stream(req: RegenerateRequest):
+    """
+    '응답 재생성': 마지막 봇 답변을 버리고, 같은 질문(맥락)으로 새 답변을 다시 스트리밍한다.
+
+    흐름:
+      - 대화의 마지막 메시지가 봇 응답이면 DB에서 삭제한다(=마지막 질문만 남김).
+      - 남은 맥락(마지막 user 메시지까지)으로 모델을 다시 호출한다.
+      - 새 응답은 stream_chat_and_save가 흘려보내며 끝나면 DB에 저장한다.
+    """
+    require_token()
+    db = SessionLocal()
+
+    convo = db.get(Conversation, req.conversation_id)
+    if not convo:
+        db.close()
+        raise HTTPException(status_code=404, detail="대화를 찾을 수 없습니다.")
+
+    # 마지막 메시지가 봇 응답이면 삭제(재생성을 위해 직전 질문 상태로 되돌린다).
+    if convo.messages and convo.messages[-1].role == "bot":
+        db.delete(convo.messages[-1])
+        db.commit()
+        db.refresh(convo)  # 삭제를 messages 관계에 반영
+
+    # 재생성하려면 적어도 사용자 메시지 하나는 남아 있어야 한다.
+    if not any(m.role == "user" for m in convo.messages):
+        db.close()
+        raise HTTPException(status_code=400, detail="재생성할 사용자 메시지가 없습니다.")
+
+    convo_id = convo.id
+    history = build_history(convo)
+    model = await resolve_model(req.model)
+
+    return StreamingResponse(
+        stream_chat_and_save(db, convo_id, history, model),
         media_type="text/plain; charset=utf-8",
         headers={"X-Conversation-Id": str(convo_id)},
     )
