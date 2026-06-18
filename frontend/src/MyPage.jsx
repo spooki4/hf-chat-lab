@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Routes, Route, Navigate, Link } from "react-router-dom";
+import MyUsagePanel from "./MyUsagePanel";
 import "./MyPage.css";
 
 /**
@@ -23,8 +24,9 @@ export default function MyPage({ apiFetch }) {
           <NavLink to="/me/profile" className="mypage-menu-item">
             ⚙️ 정보변경
           </NavLink>
-          {/* 앞으로 메뉴 추가:
-              <NavLink to="/me/usage" className="mypage-menu-item">📊 토큰 사용량</NavLink> */}
+          <NavLink to="/me/usage" className="mypage-menu-item">
+            📊 토큰 사용량
+          </NavLink>
         </nav>
       </aside>
 
@@ -32,6 +34,7 @@ export default function MyPage({ apiFetch }) {
         <Routes>
           <Route index element={<Navigate to="/me/profile" replace />} />
           <Route path="profile" element={<ProfilePanel apiFetch={apiFetch} />} />
+          <Route path="usage" element={<MyUsagePanel apiFetch={apiFetch} />} />
           <Route path="*" element={<Navigate to="/me/profile" replace />} />
         </Routes>
       </main>

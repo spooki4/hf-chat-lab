@@ -1,0 +1,191 @@
+/* 토큰 사용량 페이지 공용 스타일 (마이/관리 공유) */
+
+/* 기간/필터 컨트롤 줄 */
+.usage-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.usage-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: #555;
+}
+
+.usage-field input,
+.usage-field select {
+  padding: 7px 10px;
+  border: 1px solid #cdd0d4;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  background: #fff;
+}
+
+.usage-presets {
+  display: flex;
+  gap: 6px;
+}
+
+.usage-presets button {
+  padding: 7px 11px;
+  border: 1px solid #cdd0d4;
+  background: #fff;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: #333;
+}
+
+.usage-presets button:hover {
+  background: #f3f4f6;
+}
+
+/* 요약 카드 */
+.usage-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.usage-card {
+  background: #fff;
+  border: 1px solid #e3e5e8;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usage-card.accent {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.usage-card-label {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.usage-card-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+/* 차트 박스 */
+.usage-charts {
+  display: grid;
+  gap: 16px;
+}
+
+.usage-charts.two {
+  grid-template-columns: 1fr 1fr;
+}
+
+.usage-chart-box {
+  background: #fff;
+  border: 1px solid #e3e5e8;
+  border-radius: 12px;
+  padding: 16px 18px;
+  min-width: 0;
+}
+
+.usage-chart-title {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+  color: #374151;
+}
+
+.usage-empty {
+  text-align: center;
+  color: #9aa1ac;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  padding: 40px 0;
+}
+
+.usage-empty-inline {
+  color: #9aa1ac;
+  font-size: 0.85rem;
+  padding: 24px 0;
+  text-align: center;
+}
+
+/* 표 (모델별 / 사용자별 상세) */
+.usage-table-box {
+  background: #fff;
+  border: 1px solid #e3e5e8;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 9px 14px;
+  text-align: left;
+  border-bottom: 1px solid #eef0f2;
+  white-space: nowrap;
+}
+
+.usage-table th {
+  background: #fafbfc;
+  color: #555;
+  font-weight: 600;
+}
+
+.usage-table td.num,
+.usage-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-table tr:last-child td {
+  border-bottom: none;
+}
+
+.usage-table .rank {
+  color: #9ca3af;
+  font-weight: 700;
+  width: 28px;
+}
+
+.usage-loading {
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.usage-error {
+  font-size: 0.88rem;
+  color: #d33;
+  margin-bottom: 12px;
+}
+
+.usage-note {
+  font-size: 0.76rem;
+  color: #9aa1ac;
+  margin-top: 14px;
+}
+
+/* 좁은 화면 대응 */
+@media (max-width: 760px) {
+  .usage-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .usage-charts.two {
+    grid-template-columns: 1fr;
+  }
+}

@@ -13,7 +13,14 @@ DB 테이블 구조 정의 (SQLAlchemy ORM 모델)
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -45,6 +52,12 @@ class User(Base):
 
     # 이 사용자가 소유한 대화방들. 사용자를 지우면 대화도 함께 삭제(cascade).
     conversations: Mapped[list["Conversation"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    # 이 사용자의 토큰 사용량 집계 행들. 사용자를 지우면 함께 삭제.
+    token_usages: Mapped[list["TokenUsage"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )
@@ -89,3 +102,36 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+
+class TokenUsage(Base):
+    """
+    토큰 사용량 집계 테이블 (일별 × 모델별 × 사용자별로 누적).
+
+    채팅 응답을 받을 때마다 (사용자, 날짜(KST), 모델) 한 행을 찾아
+    prompt/completion/total 토큰과 요청 횟수를 더해 쌓는다.
+    개별 메시지가 아니라 '하루 단위 합계'로 모아두므로 조회가 가볍다.
+    """
+
+    __tablename__ = "token_usage"
+    # 같은 (사용자, 날짜, 모델) 조합은 한 행만 존재 → 그 행에 누적한다.
+    __table_args__ = (
+        UniqueConstraint("user_id", "day", "model", name="uq_usage_user_day_model"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    # 집계 기준 날짜 "YYYY-MM-DD" (한국 시간 KST 기준). 문자열이라 범위 조회가 간단.
+    day: Mapped[str] = mapped_column(String(10), index=True)
+    # 사용한 모델 id
+    model: Mapped[str] = mapped_column(String(255), index=True)
+    # 입력/출력/합계 토큰 누적값
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    # 이 그룹에서 발생한 채팅 요청 횟수
+    request_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    user: Mapped["User"] = relationship(back_populates="token_usages")

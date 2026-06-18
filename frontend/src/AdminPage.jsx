@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Routes, Route, Navigate, Link } from "react-router-dom";
+import AdminUsagePanel from "./AdminUsagePanel";
 import "./AdminPage.css";
 
 /**
@@ -25,8 +26,9 @@ export default function AdminPage({ apiFetch, currentEmail }) {
           <NavLink to="/admin/users" className="admin-menu-item">
             👥 사용자 관리
           </NavLink>
-          {/* 앞으로 메뉴를 여기에 추가:
-              <NavLink to="/admin/usage" className="admin-menu-item">📊 토큰 사용량</NavLink> */}
+          <NavLink to="/admin/usage" className="admin-menu-item">
+            📊 토큰 사용량
+          </NavLink>
         </nav>
       </aside>
 
@@ -38,6 +40,7 @@ export default function AdminPage({ apiFetch, currentEmail }) {
             path="users"
             element={<UsersPanel apiFetch={apiFetch} currentEmail={currentEmail} />}
           />
+          <Route path="usage" element={<AdminUsagePanel apiFetch={apiFetch} />} />
           <Route path="*" element={<Navigate to="/admin/users" replace />} />
         </Routes>
       </main>
