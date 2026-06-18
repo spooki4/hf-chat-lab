@@ -1,0 +1,250 @@
+/* 관리자 페이지 스타일 */
+.admin-page {
+  display: flex;
+  height: 100vh;
+  background: #f4f5f7;
+}
+
+/* 왼쪽: 관리 메뉴(사이드 탭) */
+.admin-nav {
+  width: 220px;
+  flex-shrink: 0;
+  background: #1f2430;
+  color: #e6e8ec;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  gap: 16px;
+}
+
+.admin-nav-top {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-back {
+  color: #9aa1ac;
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.admin-back:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.admin-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.admin-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-menu-item {
+  display: block;
+  padding: 9px 11px;
+  border-radius: 8px;
+  color: #c9cdd4;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.admin-menu-item:hover {
+  background: #2a3140;
+}
+
+/* NavLink가 현재 메뉴면 active 클래스를 자동으로 붙여준다 */
+.admin-menu-item.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+/* 오른쪽: 선택한 메뉴 내용 */
+.admin-content {
+  flex: 1;
+  overflow: auto;
+  padding: 28px 32px;
+}
+
+.admin-loading,
+.admin-error {
+  font-size: 0.9rem;
+}
+
+.admin-error {
+  color: #d33;
+}
+
+/* 사용자 관리 패널 */
+.panel-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.panel-sub {
+  color: #666;
+  font-size: 0.88rem;
+}
+
+.badge-pending-count {
+  color: #b45309;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e3e5e8;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.users-table th,
+.users-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid #eef0f2;
+  white-space: nowrap;
+}
+
+.users-table th {
+  background: #fafbfc;
+  color: #555;
+  font-weight: 600;
+}
+
+.users-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* 승인 대기 행은 살짝 강조 */
+.row-pending {
+  background: #fffbeb;
+}
+
+.cell-email {
+  color: #444;
+}
+
+.cell-date {
+  color: #888;
+}
+
+.me-tag {
+  margin-left: 6px;
+  font-size: 0.7rem;
+  background: #2563eb;
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+/* 상태/권한 배지 */
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.status-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-approved {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-rejected {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.role-admin {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.role-user {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+/* 작업 버튼들 */
+.cell-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.act {
+  border: 1px solid #cdd0d4;
+  background: #fff;
+  color: #333;
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.act:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.act:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.act.approve {
+  border-color: #86efac;
+  color: #166534;
+}
+
+.act.approve:hover:not(:disabled) {
+  background: #f0fdf4;
+}
+
+.act.reject {
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+.act.reject:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.act.delete {
+  border-color: #e5a5a5;
+  color: #b91c1c;
+}
+
+.act.delete:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.muted {
+  color: #aaa;
+  font-size: 0.8rem;
+}

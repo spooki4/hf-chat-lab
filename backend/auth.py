@@ -32,6 +32,20 @@ JWT_ALGORITHM = "HS256"
 # 토큰 유효기간(일). 지나면 다시 로그인해야 한다.
 JWT_EXPIRE_DAYS = 7
 
+# 관리자로 자동 승격할 이메일 목록(.env의 ADMIN_EMAILS, 쉼표로 구분).
+#   예) ADMIN_EMAILS=admin@a.com, boss@b.com
+# 여기 적힌 이메일은 가입/로그인 시 자동으로 role=admin + status=approved 가 된다.
+ADMIN_EMAILS = {
+    e.strip().lower()
+    for e in os.getenv("ADMIN_EMAILS", "").split(",")
+    if e.strip()
+}
+
+
+def is_admin_email(email: str) -> bool:
+    """이 이메일이 .env에 지정된 관리자 이메일인지 여부."""
+    return email.strip().lower() in ADMIN_EMAILS
+
 
 # --- 비밀번호 해싱 -----------------------------------------------------------
 def hash_password(plain: str) -> str:
@@ -92,3 +106,14 @@ def get_current_user(
         # 토큰은 유효하지만 해당 사용자가 사라진 경우(탈퇴 등)
         raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다.")
     return user
+
+
+def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+    """
+    현재 사용자가 '관리자'인지까지 확인하는 의존성.
+    관리 전용 엔드포인트에 Depends(get_current_admin)으로 끼우면,
+    관리자가 아니면 403으로 막힌다(로그인 사용자라도 차단).
+    """
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    return current_user

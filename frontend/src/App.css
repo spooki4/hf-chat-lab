@@ -110,30 +110,58 @@ body {
   padding-top: 10px;
   border-top: 1px solid #3a4150;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 이름 + 이메일 묶음 (세로) */
+.user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0; /* 자식의 ellipsis가 동작하도록 */
+}
+
+.user-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #e6e8ec;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .user-email {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: #9aa1ac;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 사이드바 하단 버튼 묶음(마이/관리/로그아웃) — 한 줄에 균등 분배 */
+.user-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 마이/관리/로그아웃 공통 버튼 스타일 */
+.nav-btn,
 .logout-btn {
-  flex-shrink: 0;
+  flex: 1; /* 가로 폭을 균등하게 나눠 가짐 */
   border: 1px solid #3a4150;
   background: transparent;
   color: #e6e8ec;
   font-size: 0.78rem;
-  padding: 5px 9px;
+  padding: 6px 4px;
   border-radius: 7px;
   cursor: pointer;
+  white-space: nowrap;
+  text-align: center;
 }
 
+.nav-btn:hover,
 .logout-btn:hover {
   background: #2a3140;
 }

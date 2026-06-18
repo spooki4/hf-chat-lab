@@ -26,6 +26,7 @@ FastAPI 백엔드 - HuggingFace 챗봇 (대화 기록 저장 + 멀티턴)
 import json
 import os
 import time
+from datetime import datetime
 
 import httpx
 from dotenv import load_dotenv
@@ -37,11 +38,13 @@ from sqlalchemy.orm import Session
 
 from auth import (
     create_access_token,
+    get_current_admin,
     get_current_user,
     hash_password,
+    is_admin_email,
     verify_password,
 )
-from database import Base, SessionLocal, engine, get_db
+from database import SessionLocal, get_db, run_migrations
 from models import Conversation, Message, User
 
 load_dotenv()
@@ -149,9 +152,34 @@ async def resolve_model(requested: str | None) -> str:
 # --- 앱 초기화 ---------------------------------------------------------------
 app = FastAPI(title="hf-chat-lab backend")
 
-# 앱이 처음 뜰 때, 모델 정의(models.py)에 맞춰 테이블이 없으면 자동 생성한다.
-# (DB 자체는 미리 만들어져 있어야 함 → README의 MySQL 준비 단계 참고)
-Base.metadata.create_all(bind=engine)
+# 앱이 처음 뜰 때, 모델 정의(models.py)에 맞춰 테이블/컬럼을 정리한다.
+# (없는 테이블 생성 + 기존 테이블에 빠진 컬럼 추가. DB 자체는 미리 만들어져 있어야 함)
+run_migrations()
+
+
+def sync_admin_accounts():
+    """
+    .env의 ADMIN_EMAILS에 적힌 이메일을 가진 기존 사용자를
+    관리자(admin) + 승인(approved) 상태로 맞춘다.
+    (이미 가입돼 있던 본인 계정을 관리자로 만들기 위한 부트스트랩)
+    """
+    db = SessionLocal()
+    try:
+        changed = False
+        for user in db.query(User).all():
+            if is_admin_email(user.email) and (
+                user.role != "admin" or user.status != "approved"
+            ):
+                user.role = "admin"
+                user.status = "approved"
+                changed = True
+        if changed:
+            db.commit()
+    finally:
+        db.close()
+
+
+sync_admin_accounts()
 
 app.add_middleware(
     CORSMiddleware,
@@ -208,6 +236,8 @@ class TitleUpdate(BaseModel):
 class RegisterRequest(BaseModel):
     email: str
     password: str
+    name: str
+    phone: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -215,18 +245,57 @@ class LoginRequest(BaseModel):
     password: str
 
 
+# 회원가입 결과(승인 대기 안내). 가입 직후에는 토큰을 주지 않는다.
+class RegisterResponse(BaseModel):
+    status: str  # "pending" | "approved"
+    message: str
+
+
 # 로그인 성공 시 돌려주는 토큰 + 사용자 정보
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     email: str
+    role: str  # 프론트가 관리자 메뉴 노출 여부를 판단하는 데 사용
 
 
 class UserOut(BaseModel):
     id: int
     email: str
+    name: str
+    phone: str | None = None
+    role: str
+    status: str
 
     model_config = {"from_attributes": True}
+
+
+# 관리자 화면에서 보여줄 사용자 정보(가입일 포함)
+class AdminUserOut(BaseModel):
+    id: int
+    email: str
+    name: str
+    phone: str | None = None
+    role: str
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# 관리자가 사용자 권한/상태를 바꿀 때의 요청 본문(둘 다 선택)
+class AdminUserUpdate(BaseModel):
+    role: str | None = None  # "admin" | "user"
+    status: str | None = None  # "pending" | "approved" | "rejected"
+
+
+# 마이페이지: 내 정보 변경 요청 본문. 보낸 항목만 변경한다(부분 수정).
+class ProfileUpdate(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    # 비밀번호 변경 시에만 사용(현재 비밀번호 확인 후 새 비밀번호로 교체)
+    current_password: str | None = None
+    new_password: str | None = None
 
 
 # --- 공용 헬퍼 ---------------------------------------------------------------
@@ -419,12 +488,21 @@ async def list_models():
     return {"models": models, "default": pick_default(models)}
 
 
-@app.post("/auth/register", response_model=TokenResponse)
+@app.post("/auth/register", response_model=RegisterResponse)
 def register(body: RegisterRequest, db: Session = Depends(get_db)):
-    """회원가입: 이메일+비밀번호로 사용자를 만들고 바로 로그인 토큰을 발급한다."""
+    """
+    회원가입: 사용자를 만들되 기본적으로 '승인 대기(pending)' 상태로 둔다.
+    가입했다고 바로 로그인되는 게 아니라, 관리자가 승인해야 로그인할 수 있다.
+    (단, .env의 ADMIN_EMAILS에 해당하는 이메일은 자동으로 관리자+승인 처리)
+    """
     email = body.email.strip().lower()
+    name = body.name.strip()
+    phone = (body.phone or "").strip() or None
+
     if not email or not body.password:
         raise HTTPException(status_code=400, detail="이메일과 비밀번호를 입력하세요.")
+    if not name:
+        raise HTTPException(status_code=400, detail="이름을 입력하세요.")
     if len(body.password) < 4:
         raise HTTPException(status_code=400, detail="비밀번호는 4자 이상이어야 합니다.")
 
@@ -432,32 +510,149 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=409, detail="이미 가입된 이메일입니다.")
 
-    user = User(email=email, password_hash=hash_password(body.password))
+    # 관리자 이메일이면 자동 승격, 아니면 일반+대기
+    admin = is_admin_email(email)
+    user = User(
+        email=email,
+        password_hash=hash_password(body.password),
+        name=name,
+        phone=phone,
+        role="admin" if admin else "user",
+        status="approved" if admin else "pending",
+    )
     db.add(user)
     db.commit()
     db.refresh(user)  # DB가 채워준 id 확보
 
-    token = create_access_token(user.id)
-    return TokenResponse(access_token=token, email=user.email)
+    if user.status == "approved":
+        return RegisterResponse(status="approved", message="가입이 완료되었습니다. 로그인해 주세요.")
+    return RegisterResponse(
+        status="pending",
+        message="가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.",
+    )
 
 
 @app.post("/auth/login", response_model=TokenResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)):
-    """로그인: 이메일/비밀번호가 맞으면 토큰을 발급한다."""
+    """로그인: 이메일/비밀번호가 맞고 '승인된' 사용자에게만 토큰을 발급한다."""
     email = body.email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
     # 사용자 없음/비밀번호 불일치 모두 같은 메시지로 응답(어느 쪽이 틀렸는지 흘리지 않음)
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
 
+    # 승인 상태 확인: 대기/거부 계정은 로그인 차단
+    if user.status == "pending":
+        raise HTTPException(status_code=403, detail="아직 승인 대기 중입니다. 관리자 승인 후 이용해 주세요.")
+    if user.status == "rejected":
+        raise HTTPException(status_code=403, detail="가입이 거부된 계정입니다. 관리자에게 문의해 주세요.")
+
     token = create_access_token(user.id)
-    return TokenResponse(access_token=token, email=user.email)
+    return TokenResponse(access_token=token, email=user.email, role=user.role)
 
 
 @app.get("/auth/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):
-    """현재 로그인한 사용자 정보 반환 (프론트가 토큰 유효성 확인 + 이메일 표시에 사용)."""
+    """현재 로그인한 사용자 정보 반환 (프론트가 토큰 유효성 확인 + 사용자 표시에 사용)."""
     return current_user
+
+
+@app.patch("/auth/me", response_model=UserOut)
+def update_me(
+    body: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    마이페이지: 내 정보(이름/연락처/비밀번호)를 변경한다.
+    보낸 항목만 바꾼다. 비밀번호는 '현재 비밀번호' 확인을 통과해야 변경된다.
+    """
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="이름을 입력하세요.")
+        current_user.name = name
+
+    if body.phone is not None:
+        current_user.phone = body.phone.strip() or None
+
+    # 비밀번호 변경(요청에 new_password가 있을 때만)
+    if body.new_password:
+        if not body.current_password:
+            raise HTTPException(status_code=400, detail="현재 비밀번호를 입력하세요.")
+        if not verify_password(body.current_password, current_user.password_hash):
+            raise HTTPException(status_code=400, detail="현재 비밀번호가 올바르지 않습니다.")
+        if len(body.new_password) < 4:
+            raise HTTPException(status_code=400, detail="새 비밀번호는 4자 이상이어야 합니다.")
+        current_user.password_hash = hash_password(body.new_password)
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+# --- 관리자 전용 엔드포인트 --------------------------------------------------
+# 모두 Depends(get_current_admin)으로 보호된다 → 관리자만 호출 가능.
+
+# 상태 정렬 우선순위: 승인 대기를 맨 위로 올려 관리자가 먼저 처리하게 한다.
+_STATUS_ORDER = {"pending": 0, "approved": 1, "rejected": 2}
+
+
+@app.get("/admin/users", response_model=list[AdminUserOut])
+def admin_list_users(
+    _admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """전체 사용자 목록. 승인 대기 → 승인 → 거부 순, 같은 상태면 최신 가입순."""
+    users = db.query(User).all()
+    users.sort(key=lambda u: (_STATUS_ORDER.get(u.status, 9), -u.id))
+    return users
+
+
+@app.patch("/admin/users/{user_id}", response_model=AdminUserOut)
+def admin_update_user(
+    user_id: int,
+    body: AdminUserUpdate,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """사용자의 권한(role) 또는 승인 상태(status)를 변경한다(승인/거부/권한부여)."""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    # 실수로 자기 자신을 강등/차단해 스스로 잠기는 것을 방지
+    if user.id == admin.id:
+        raise HTTPException(status_code=400, detail="자기 자신의 권한/상태는 변경할 수 없습니다.")
+
+    if body.role is not None:
+        if body.role not in ("admin", "user"):
+            raise HTTPException(status_code=400, detail="권한 값이 올바르지 않습니다.")
+        user.role = body.role
+    if body.status is not None:
+        if body.status not in ("pending", "approved", "rejected"):
+            raise HTTPException(status_code=400, detail="상태 값이 올바르지 않습니다.")
+        user.status = body.status
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """사용자를 삭제한다(소유한 대화/메시지도 함께 삭제됨)."""
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="자기 자신은 삭제할 수 없습니다.")
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    db.delete(user)
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/conversations", response_model=list[ConversationOut])

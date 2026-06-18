@@ -1,9 +1,12 @@
 import { useState, useRef, useEffect } from "react";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm"; // 표, 체크리스트 등 GitHub 스타일 마크다운 지원
 import rehypeHighlight from "rehype-highlight"; // 코드블록 문법 하이라이트
 import "highlight.js/styles/github-dark.css"; // 하이라이트 다크 테마
 import Login from "./Login"; // 로그인/회원가입 화면
+import AdminPage from "./AdminPage"; // 관리자 페이지(사용자 관리 등)
+import MyPage from "./MyPage"; // 마이페이지(정보변경 등)
 
 // 백엔드 주소. .env(VITE_API_URL)로 바꿀 수 있고, 없으면 로컬 기본값을 쓴다.
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -16,6 +19,10 @@ export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
   // userEmail: 현재 로그인한 사용자 이메일 (사이드바 표시용)
   const [userEmail, setUserEmail] = useState("");
+  // userName: 현재 로그인한 사용자 이름 (사이드바에 이메일과 함께 표시)
+  const [userName, setUserName] = useState("");
+  // userRole: 현재 사용자 권한("admin" | "user"). 관리 메뉴 노출 판단에 사용.
+  const [userRole, setUserRole] = useState("user");
   // conversations: 사이드바에 보여줄 대화 목록 [{ id, title }, ...]
   const [conversations, setConversations] = useState([]);
   // activeId: 현재 열려있는 대화의 id (null이면 "새 대화" 상태)
@@ -32,6 +39,9 @@ export default function App() {
   const [editingText, setEditingText] = useState("");
   // copiedIndex: 방금 '복사됨 ✓'을 보여줄 메시지의 인덱스 (없으면 null)
   const [copiedIndex, setCopiedIndex] = useState(null);
+
+  // 페이지 이동용(관리자 페이지 등)
+  const navigate = useNavigate();
 
   // 새 메시지가 추가되면 맨 아래로 스크롤
   const bottomRef = useRef(null);
@@ -51,6 +61,8 @@ export default function App() {
         if (!res.ok) throw new Error("토큰 만료");
         const u = await res.json();
         setUserEmail(u.email);
+        setUserName(u.name || "");
+        setUserRole(u.role);
         loadConversations();
         loadModels();
       } catch {
@@ -62,11 +74,12 @@ export default function App() {
 
   // --- 인증 헬퍼 -------------------------------------------------------------
 
-  // 로그인/회원가입 성공 시: 토큰을 저장하고 화면을 채팅으로 전환한다.
-  function handleAuth(newToken, email) {
+  // 로그인 성공 시: 토큰을 저장하고 화면을 채팅으로 전환한다.
+  function handleAuth(newToken, email, role) {
     localStorage.setItem(TOKEN_KEY, newToken);
     setToken(newToken);
     setUserEmail(email);
+    setUserRole(role || "user");
   }
 
   // 로그아웃: 토큰을 지우고 모든 화면 상태를 초기화한다.
@@ -74,6 +87,8 @@ export default function App() {
     localStorage.removeItem(TOKEN_KEY);
     setToken("");
     setUserEmail("");
+    setUserName("");
+    setUserRole("user");
     setConversations([]);
     setMessages([]);
     setActiveId(null);
@@ -322,7 +337,8 @@ export default function App() {
     return <Login onAuth={handleAuth} />;
   }
 
-  return (
+  // 채팅 화면(라우트 "/"). 아래 Routes에서 다른 페이지와 함께 분기한다.
+  const chatScreen = (
     <div className="app">
       {/* 왼쪽: 대화 목록 사이드바 */}
       <aside className="sidebar">
@@ -372,14 +388,40 @@ export default function App() {
           )}
         </div>
 
-        {/* 사이드바 하단: 로그인한 사용자 + 로그아웃 */}
+        {/* 사이드바 하단: 로그인한 사용자 정보 + 메뉴/로그아웃 */}
         <div className="user-bar">
-          <span className="user-email" title={userEmail}>
-            {userEmail}
-          </span>
-          <button className="logout-btn" onClick={handleLogout} title="로그아웃">
-            로그아웃
-          </button>
+          {/* 이름(굵게) + 이메일(작게) */}
+          <div className="user-info">
+            <span className="user-name">{userName || userEmail}</span>
+            {userName && (
+              <span className="user-email" title={userEmail}>
+                {userEmail}
+              </span>
+            )}
+          </div>
+          <div className="user-actions">
+            {/* 모든 사용자: 마이페이지 진입 버튼 */}
+            <button
+              className="nav-btn"
+              onClick={() => navigate("/me")}
+              title="마이페이지"
+            >
+              👤 마이
+            </button>
+            {/* 관리자에게만 보이는 관리 페이지 진입 버튼 */}
+            {userRole === "admin" && (
+              <button
+                className="nav-btn"
+                onClick={() => navigate("/admin")}
+                title="관리 페이지"
+              >
+                🛠 관리
+              </button>
+            )}
+            <button className="logout-btn" onClick={handleLogout} title="로그아웃">
+              🚪 로그아웃
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -472,5 +514,27 @@ export default function App() {
         </form>
       </main>
     </div>
+  );
+
+  // URL에 따라 화면 분기:
+  //   "/"        → 채팅
+  //   "/admin/*" → 관리자 페이지(관리자만, 아니면 채팅으로 되돌림)
+  //   그 외       → 채팅으로
+  return (
+    <Routes>
+      <Route path="/" element={chatScreen} />
+      <Route
+        path="/admin/*"
+        element={
+          userRole === "admin" ? (
+            <AdminPage apiFetch={apiFetch} currentEmail={userEmail} />
+          ) : (
+            <Navigate to="/" replace />
+          )
+        }
+      />
+      <Route path="/me/*" element={<MyPage apiFetch={apiFetch} />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }

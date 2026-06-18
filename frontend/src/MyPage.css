@@ -1,0 +1,147 @@
+/* 마이페이지 스타일 (관리자 페이지와 동일한 사이드 탭 레이아웃) */
+.mypage {
+  display: flex;
+  height: 100vh;
+  background: #f4f5f7;
+}
+
+/* 왼쪽: 메뉴 */
+.mypage-nav {
+  width: 220px;
+  flex-shrink: 0;
+  background: #1f2430;
+  color: #e6e8ec;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  gap: 16px;
+}
+
+.mypage-nav-top {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mypage-back {
+  color: #9aa1ac;
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.mypage-back:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.mypage-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.mypage-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mypage-menu-item {
+  display: block;
+  padding: 9px 11px;
+  border-radius: 8px;
+  color: #c9cdd4;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.mypage-menu-item:hover {
+  background: #2a3140;
+}
+
+.mypage-menu-item.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+/* 오른쪽: 내용 */
+.mypage-content {
+  flex: 1;
+  overflow: auto;
+  padding: 28px 32px;
+}
+
+.mypage-loading {
+  font-size: 0.9rem;
+}
+
+.panel-h {
+  margin: 0 0 18px;
+  font-size: 1.25rem;
+}
+
+/* 카드형 폼 */
+.profile-card {
+  max-width: 440px;
+  background: #fff;
+  border: 1px solid #e3e5e8;
+  border-radius: 12px;
+  padding: 20px 22px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile-card h4 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.field input {
+  padding: 9px 11px;
+  border: 1px solid #cdd0d4;
+  border-radius: 9px;
+  font-size: 0.95rem;
+}
+
+.field input:disabled {
+  background: #f3f4f6;
+  color: #888;
+}
+
+.profile-card button[type="submit"] {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 9px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.profile-card button[type="submit"]:disabled {
+  background: #9db4ec;
+  cursor: not-allowed;
+}
+
+.form-error {
+  margin: 0;
+  color: #d33;
+  font-size: 0.83rem;
+}
+
+.form-ok {
+  margin: 0;
+  color: #137a47;
+  font-size: 0.83rem;
+}

@@ -32,6 +32,15 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     # 비밀번호는 절대 평문으로 저장하지 않는다. bcrypt 해시 문자열만 저장.
     password_hash: Mapped[str] = mapped_column(String(255))
+    # 사용자 이름(표시용). 가입 시 필수로 받는다.
+    name: Mapped[str] = mapped_column(String(100), default="")
+    # 연락처. 선택 입력이라 비어 있을 수 있다(nullable).
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # 권한: "admin"(관리자) 또는 "user"(일반). 기본은 일반 사용자.
+    role: Mapped[str] = mapped_column(String(16), default="user")
+    # 가입 승인 상태: "pending"(대기) / "approved"(승인) / "rejected"(거부).
+    # 가입하면 pending이고, 관리자가 승인해야 "approved"가 되어 로그인할 수 있다.
+    status: Mapped[str] = mapped_column(String(16), default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     # 이 사용자가 소유한 대화방들. 사용자를 지우면 대화도 함께 삭제(cascade).

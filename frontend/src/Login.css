@@ -61,6 +61,17 @@
   font-size: 0.85rem;
 }
 
+/* 가입 접수 등 성공/안내 메시지 (초록색) */
+.login-notice {
+  margin: 0;
+  color: #137a47;
+  background: #e7f6ec;
+  border: 1px solid #bce3cc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+
 .login-toggle {
   margin: 4px 0 0;
   text-align: center;

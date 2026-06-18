@@ -14,7 +14,7 @@ import os
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
@@ -77,3 +77,43 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# users 테이블에 나중에 추가된 컬럼들.
+#   (column 정의 SQL, 기존 행에 채울 backfill 값)
+# create_all()은 '없는 테이블'만 만들 뿐 '기존 테이블에 컬럼 추가'는 못 하므로,
+# 이미 운영 중인 DB(=가입자가 있는 DB)를 위해 빠진 컬럼만 직접 ALTER로 채운다.
+_USER_COLUMN_MIGRATIONS = [
+    # 이름: 기존 행은 빈 문자열로 채움
+    ("name", "VARCHAR(100) NOT NULL DEFAULT ''"),
+    # 연락처: 선택값이라 NULL 허용
+    ("phone", "VARCHAR(30) NULL"),
+    # 권한: 기존 행은 일반 사용자로
+    ("role", "VARCHAR(16) NOT NULL DEFAULT 'user'"),
+    # 승인 상태: 승인 기능이 생기기 '전'부터 있던 기존 사용자는
+    # 이미 쓰던 계정이므로 자동으로 'approved'로 인정(grandfather)한다.
+    ("status", "VARCHAR(16) NOT NULL DEFAULT 'approved'"),
+]
+
+
+def run_migrations():
+    """
+    스키마를 코드 모델과 맞춘다.
+      1) 없는 테이블 생성 (create_all)
+      2) users 테이블에 빠진 컬럼이 있으면 ALTER로 추가 (기존 데이터 보존)
+    앱이 뜰 때 한 번 호출한다. 이미 맞춰져 있으면 아무 일도 하지 않는다(idempotent).
+    """
+    Base.metadata.create_all(bind=engine)
+
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return  # create_all이 새 스키마로 막 만들었으면 추가 작업 불필요
+
+    existing = {c["name"] for c in inspector.get_columns("users")}
+    to_add = [(col, ddl) for col, ddl in _USER_COLUMN_MIGRATIONS if col not in existing]
+    if not to_add:
+        return
+
+    with engine.begin() as conn:
+        for col, ddl in to_add:
+            conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {ddl}"))
