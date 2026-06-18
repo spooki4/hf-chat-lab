@@ -17,7 +17,7 @@ body {
 
 /* ===== 사이드바 ===== */
 .sidebar {
-  width: 240px;
+  width: 300px;
   flex-shrink: 0;
   background: #1f2430;
   color: #e6e8ec;
@@ -39,6 +39,56 @@ body {
 
 .new-chat:hover {
   background: #2a3140;
+}
+
+/* 대화 제목 검색 */
+.convo-search {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.convo-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 28px 8px 10px;
+  border: 1px solid #3a4150;
+  border-radius: 8px;
+  background: #161a23;
+  color: #e6e8ec;
+  font-size: 0.85rem;
+}
+
+.convo-search input::placeholder {
+  color: #6b7280;
+}
+
+.convo-search input:focus {
+  outline: none;
+  border-color: #4a90e2;
+}
+
+.convo-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  color: #9aa1ac;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.convo-search-clear:hover {
+  color: #fff;
+}
+
+.convo-empty {
+  color: #6b7280;
+  font-size: 0.82rem;
+  padding: 10px 6px;
 }
 
 .convo-list {
@@ -68,10 +118,24 @@ body {
   background: #34405a;
 }
 
+/* 제목 + 시각(세로 묶음) */
+.convo-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
 .convo-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.convo-time {
+  font-size: 0.72rem;
+  color: #868f9e;
 }
 
 /* 수정/삭제 버튼 묶음: 평소엔 숨기고, 항목에 호버하면 나타남 */
@@ -200,8 +264,13 @@ h1 {
   font-size: 1.4rem;
 }
 
-.model-select {
-  padding: 8px 10px;
+/* 모델 선택 버튼 (누르면 모달) */
+.model-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  padding: 8px 12px;
   border: 1px solid #cdd0d4;
   border-radius: 8px;
   background: #fff;
@@ -209,9 +278,26 @@ h1 {
   cursor: pointer;
 }
 
-.model-select:disabled {
+.model-button:hover:not(:disabled) {
+  border-color: #2563eb;
+  background: #f8faff;
+}
+
+.model-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.model-button-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-button-caret {
+  color: #9aa1ac;
+  font-size: 0.75rem;
+  flex-shrink: 0;
 }
 
 /* 응답 대기 중 깜빡이는 점 */
@@ -350,6 +436,35 @@ h1 {
 .msg-btn:hover {
   background: #f0f2f5;
   border-color: #b9bec6;
+}
+
+/* ===== 메시지 메타 (시각 + 모델) ===== */
+.msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 0.7rem;
+}
+
+.message.user .msg-meta {
+  color: rgba(255, 255, 255, 0.72);
+  justify-content: flex-end;
+}
+
+.message.bot .msg-meta {
+  color: #8a909b;
+}
+
+.msg-model {
+  background: #e0e7ff;
+  color: #3730a3;
+  padding: 1px 8px;
+  border-radius: 999px;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .input-row {

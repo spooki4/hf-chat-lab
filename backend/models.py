@@ -74,6 +74,9 @@ class Conversation(Base):
     # 대화 제목. 첫 메시지로 자동 생성한다(예: "안녕하세요…").
     title: Mapped[str] = mapped_column(String(255), default="새 대화")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    # 마지막 활동 시각(새 메시지가 오갈 때마다 갱신). 사이드바를 '최근 대화순'으로
+    # 정렬하고, 제목 옆에 시각을 표기하는 데 사용한다.
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
 
     # 대화방의 소유자(역방향 관계).
     user: Mapped["User"] = relationship(back_populates="conversations")
@@ -99,6 +102,9 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(16))
     # 메시지 본문. 길 수 있으므로 Text 타입.
     content: Mapped[str] = mapped_column(Text)
+    # 이 답변을 만든 모델 id(봇 메시지에만 기록, 사용자 메시지는 NULL).
+    # "이 답변은 어떤 모델이 줬는지"를 화면에 표기하는 데 사용한다.
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")

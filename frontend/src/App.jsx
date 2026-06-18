@@ -7,9 +7,44 @@ import "highlight.js/styles/github-dark.css"; // 하이라이트 다크 테마
 import Login from "./Login"; // 로그인/회원가입 화면
 import AdminPage from "./AdminPage"; // 관리자 페이지(사용자 관리 등)
 import MyPage from "./MyPage"; // 마이페이지(정보변경 등)
+import ModelPicker from "./ModelPicker"; // 모델 선택 모달(검색 + 단일 선택)
 
 // 백엔드 주소. .env(VITE_API_URL)로 바꿀 수 있고, 없으면 로컬 기본값을 쓴다.
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+// DB의 시각 문자열은 타임존 표기가 없는 UTC다. JS Date가 로컬로 오해하지 않도록
+// 표기가 없으면 'Z'(UTC)를 붙여 해석한다. (클라이언트가 찍은 ISO는 이미 Z 포함)
+function toDate(iso) {
+  if (!iso) return null;
+  const hasTz = /[zZ]|[+-]\d\d:?\d\d$/.test(iso);
+  return new Date(hasTz ? iso : iso + "Z");
+}
+
+// 메시지 아래 표기용: "06-18 17:35"
+function formatMsgTime(iso) {
+  const d = toDate(iso);
+  if (!d || isNaN(d)) return "";
+  return d.toLocaleString("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+// 사이드바 대화 옆 표기용: 오늘이면 "17:35", 아니면 "06-18"
+function formatConvoTime(iso) {
+  const d = toDate(iso);
+  if (!d || isNaN(d)) return "";
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return d.toLocaleString("ko-KR", sameDay
+    ? { hour: "2-digit", minute: "2-digit" }
+    : { month: "2-digit", day: "2-digit" });
+}
 
 // 로그인 토큰을 브라우저에 저장할 때 쓰는 key (새로고침해도 로그인 유지)
 const TOKEN_KEY = "hf_chat_token";
@@ -39,6 +74,10 @@ export default function App() {
   const [editingText, setEditingText] = useState("");
   // copiedIndex: 방금 '복사됨 ✓'을 보여줄 메시지의 인덱스 (없으면 null)
   const [copiedIndex, setCopiedIndex] = useState(null);
+  // search: 대화 제목 검색어 (사이드바 필터)
+  const [search, setSearch] = useState("");
+  // modelPickerOpen: 모델 선택 모달 표시 여부
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
 
   // 페이지 이동용(관리자 페이지 등)
   const navigate = useNavigate();
@@ -217,9 +256,10 @@ export default function App() {
       if (done) break;
       acc += decoder.decode(value, { stream: true });
       // messages의 마지막 항목(봇 메시지)만 갱신 → 타이핑 효과
+      // (시각/모델 등 기존 메타는 유지하고 content만 교체)
       setMessages((prev) => {
         const next = [...prev];
-        next[next.length - 1] = { role: "bot", content: acc };
+        next[next.length - 1] = { ...next[next.length - 1], content: acc };
         return next;
       });
     }
@@ -232,11 +272,13 @@ export default function App() {
     const text = input.trim();
     if (!text || loading) return;
 
-    // 내 메시지 + 비어있는 봇 메시지(여기에 토큰을 이어붙일 것)를 함께 추가
+    // 내 메시지 + 비어있는 봇 메시지(여기에 토큰을 이어붙일 것)를 함께 추가.
+    // 시각은 지금(클라이언트), 봇 메시지에는 사용한 모델을 함께 기록한다.
+    const nowIso = new Date().toISOString();
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: text },
-      { role: "bot", content: "" },
+      { role: "user", content: text, created_at: nowIso },
+      { role: "bot", content: "", model: selectedModel, created_at: nowIso },
     ]);
     setInput("");
     setLoading(true);
@@ -260,15 +302,21 @@ export default function App() {
       // 응답 본문을 스트림으로 읽으며 마지막 봇 메시지에 이어붙인다.
       await readStreamIntoLastBubble(res);
 
-      // 새 대화였다면 id 활성화 + 제목 자동 생성(끝나면 사이드바 갱신)
+      // 새 대화였다면 id 활성화 + 제목 자동 생성(끝나면 사이드바 갱신).
+      // 기존 대화면 최근활동 시각/정렬이 바뀌었으니 목록을 새로 불러온다.
       if (activeId === null && newId) {
         setActiveId(newId);
         generateTitle(newId);
+      } else {
+        loadConversations();
       }
     } catch (err) {
       setMessages((prev) => {
         const next = [...prev];
-        next[next.length - 1] = { role: "bot", content: `⚠️ 오류: ${err.message}` };
+        next[next.length - 1] = {
+          ...next[next.length - 1],
+          content: `⚠️ 오류: ${err.message}`,
+        };
         return next;
       });
     } finally {
@@ -298,10 +346,17 @@ export default function App() {
     if (loading || activeId === null) return;
 
     // 화면의 마지막 봇 말풍선을 비워 새 응답을 받을 자리로 만든다.
+    // 재생성도 '지금/현재 선택한 모델'로 기록을 갱신한다.
+    const nowIso = new Date().toISOString();
     setMessages((prev) => {
       const next = [...prev];
       if (next.length && next[next.length - 1].role === "bot") {
-        next[next.length - 1] = { role: "bot", content: "" };
+        next[next.length - 1] = {
+          role: "bot",
+          content: "",
+          model: selectedModel,
+          created_at: nowIso,
+        };
       }
       return next;
     });
@@ -319,10 +374,14 @@ export default function App() {
 
       if (!res.ok) throw new Error(await res.text());
       await readStreamIntoLastBubble(res);
+      loadConversations(); // 최근활동 시각/정렬 갱신
     } catch (err) {
       setMessages((prev) => {
         const next = [...prev];
-        next[next.length - 1] = { role: "bot", content: `⚠️ 오류: ${err.message}` };
+        next[next.length - 1] = {
+          ...next[next.length - 1],
+          content: `⚠️ 오류: ${err.message}`,
+        };
         return next;
       });
     } finally {
@@ -337,6 +396,16 @@ export default function App() {
     return <Login onAuth={handleAuth} />;
   }
 
+  // 제목 검색: 입력이 있으면 제목에 포함된 대화만 보여준다(대소문자 무시).
+  const q = search.trim().toLowerCase();
+  const filteredConversations = q
+    ? conversations.filter((c) => (c.title || "").toLowerCase().includes(q))
+    : conversations;
+
+  // 모델 선택 버튼에 표시할 현재 모델 이름
+  const selectedModelLabel =
+    models.find((m) => m.id === selectedModel)?.label || selectedModel || "모델 선택";
+
   // 채팅 화면(라우트 "/"). 아래 Routes에서 다른 페이지와 함께 분기한다.
   const chatScreen = (
     <div className="app">
@@ -345,8 +414,33 @@ export default function App() {
         <button className="new-chat" onClick={startNewChat}>
           + 새 대화
         </button>
+
+        {/* 대화 제목 검색 */}
+        <div className="convo-search">
+          <input
+            type="text"
+            placeholder="🔍 제목 검색"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button
+              className="convo-search-clear"
+              onClick={() => setSearch("")}
+              title="검색 지우기"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
         <div className="convo-list">
-          {conversations.map((c) =>
+          {filteredConversations.length === 0 && (
+            <p className="convo-empty">
+              {conversations.length === 0 ? "대화가 없습니다." : "검색 결과가 없습니다."}
+            </p>
+          )}
+          {filteredConversations.map((c) =>
             editingId === c.id ? (
               // 편집 모드: 인라인 입력창
               <div key={c.id} className="convo-item editing">
@@ -366,7 +460,10 @@ export default function App() {
                 className={`convo-item ${c.id === activeId ? "active" : ""}`}
                 onClick={() => selectConversation(c.id)}
               >
-                <span className="convo-title">{c.title || "새 대화"}</span>
+                <div className="convo-main">
+                  <span className="convo-title">{c.title || "새 대화"}</span>
+                  <span className="convo-time">{formatConvoTime(c.updated_at)}</span>
+                </div>
                 <span className="convo-actions">
                   <button
                     className="convo-btn"
@@ -429,20 +526,16 @@ export default function App() {
       <main className="chat-container">
         <header className="chat-header">
           <h1>🤗 HF Chat Lab</h1>
-          {/* 모델 선택 드롭다운 */}
-          <select
-            className="model-select"
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
+          {/* 모델 선택: 버튼을 누르면 검색 가능한 모달이 열린다(모델이 많아서) */}
+          <button
+            className="model-button"
+            onClick={() => setModelPickerOpen(true)}
             disabled={loading}
             title="사용할 모델 선택"
           >
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+            <span className="model-button-label">{selectedModelLabel}</span>
+            <span className="model-button-caret">▾</span>
+          </button>
         </header>
 
         <div className="messages">
@@ -451,6 +544,7 @@ export default function App() {
           )}
           {messages.map((m, i) => {
             const isLast = i === messages.length - 1; // 마지막 메시지인지
+            const time = formatMsgTime(m.created_at);
             return (
               <div key={i} className={`message ${m.role}`}>
                 {m.role === "bot" ? (
@@ -494,6 +588,18 @@ export default function App() {
                   // 사용자 입력은 안전하게 평문으로 표시
                   m.content
                 )}
+
+                {/* 메시지 아래 메타: 시각 + (봇이면) 사용한 모델 */}
+                {m.content && (
+                  <div className="msg-meta">
+                    {time && <span className="msg-time">{time}</span>}
+                    {m.role === "bot" && m.model && (
+                      <span className="msg-model" title={m.model}>
+                        🤖 {m.model}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -513,6 +619,19 @@ export default function App() {
           </button>
         </form>
       </main>
+
+      {/* 모델 선택 모달 (검색 + 단일 선택) */}
+      {modelPickerOpen && (
+        <ModelPicker
+          models={models}
+          value={selectedModel}
+          onSelect={(id) => {
+            setSelectedModel(id);
+            setModelPickerOpen(false);
+          }}
+          onClose={() => setModelPickerOpen(false)}
+        />
+      )}
     </div>
   );
 

@@ -26,7 +26,7 @@ FastAPI 백엔드 - HuggingFace 챗봇 (대화 기록 저장 + 멀티턴)
 import json
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -51,6 +51,11 @@ from models import Conversation, Message, TokenUsage, User
 
 # 토큰 사용량을 '하루 단위'로 묶을 때 기준이 되는 시간대(한국).
 KST = ZoneInfo("Asia/Seoul")
+
+
+def now_utc() -> datetime:
+    """현재 UTC 시각(대화 최근 활동 시각 갱신용)."""
+    return datetime.now(timezone.utc)
 
 load_dotenv()
 
@@ -221,6 +226,10 @@ class MessageOut(BaseModel):
     id: int
     role: str
     content: str
+    # 메시지 작성 시각(UTC). 프론트가 사용자 로컬 시간으로 변환해 표기.
+    created_at: datetime
+    # 봇 응답을 만든 모델(사용자 메시지는 null)
+    model: str | None = None
 
     # SQLAlchemy 모델 객체를 그대로 응답으로 변환할 수 있게 해주는 설정
     model_config = {"from_attributes": True}
@@ -229,6 +238,8 @@ class MessageOut(BaseModel):
 class ConversationOut(BaseModel):
     id: int
     title: str
+    # 최근 활동 시각(UTC). 사이드바 정렬/시각 표기에 사용.
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -613,7 +624,11 @@ async def stream_chat_and_save(
         # 스트림 종료 후 전체 응답을 DB에 저장하고, 토큰 사용량을 적재한 뒤 세션 정리
         full = "".join(collected).strip()
         if full:
-            db.add(Message(conversation_id=convo_id, role="bot", content=full))
+            db.add(Message(conversation_id=convo_id, role="bot", content=full, model=model))
+            # 대화의 최근 활동 시각 갱신(사이드바를 최근순으로 정렬하기 위해)
+            convo = db.get(Conversation, convo_id)
+            if convo:
+                convo.updated_at = now_utc()
             db.commit()
             # 토큰 사용량 적재 (실패해도 채팅 자체는 영향받지 않도록 보호)
             try:
@@ -932,11 +947,11 @@ def admin_usage(
 def list_conversations(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
-    """현재 사용자의 대화 목록을 최신순으로 반환 (프론트 사이드바용)."""
+    """현재 사용자의 대화 목록을 '최근 활동순'으로 반환 (프론트 사이드바용)."""
     return (
         db.query(Conversation)
         .filter(Conversation.user_id == current_user.id)
-        .order_by(Conversation.id.desc())
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
         .all()
     )
 
@@ -1045,8 +1060,9 @@ async def chat(
         temperature=CHAT_TEMPERATURE,
     )
 
-    # 5) 모델 응답을 DB에 저장
-    db.add(Message(conversation_id=convo.id, role="bot", content=reply))
+    # 5) 모델 응답을 DB에 저장 (어떤 모델이 답했는지도 함께 기록) + 최근 활동 시각 갱신
+    db.add(Message(conversation_id=convo.id, role="bot", content=reply, model=model))
+    convo.updated_at = now_utc()
     db.commit()
 
     # 6) 토큰 사용량 적재 (실패해도 응답에는 영향 없도록 보호)
