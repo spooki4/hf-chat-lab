@@ -13,6 +13,7 @@
     토큰만 검증하면 누구인지 알 수 있다(상태 없는 인증).
 """
 
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -24,11 +25,42 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User
 
+logger = logging.getLogger("hf-chat-lab.auth")
+
 # --- 설정 -------------------------------------------------------------------
 # JWT 서명에 쓰는 비밀키. 이 값이 유출되면 누구나 토큰을 위조할 수 있으므로 .env로 관리.
 # (개발 편의를 위한 기본값을 두지만, 실제로는 .env의 JWT_SECRET를 반드시 설정해야 한다)
-JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-me")
+_DEFAULT_JWT_SECRET = "dev-secret-change-me"
+JWT_SECRET = os.getenv("JWT_SECRET", _DEFAULT_JWT_SECRET)
 JWT_ALGORITHM = "HS256"
+
+# 실행 환경. "production"이면 보안 가드를 엄격하게 적용한다(.env의 APP_ENV).
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+
+
+def check_jwt_secret(secret: str | None, env: str) -> None:
+    """
+    JWT 비밀키 시작 가드.
+      - 운영(production)에서 비밀키가 비었거나 기본값 그대로면 '실행을 거부'한다.
+        (기본값으로 서명하면 누구나 같은 키로 토큰을 위조할 수 있기 때문)
+      - 개발 환경에서는 막지 않되, 기본값을 쓰면 경고만 남긴다.
+    """
+    is_weak = (not secret) or secret == _DEFAULT_JWT_SECRET
+    if not is_weak:
+        return
+    if env == "production":
+        raise RuntimeError(
+            "운영 환경에서 JWT_SECRET이 설정되지 않았거나 기본값입니다. "
+            ".env에 길고 무작위한 JWT_SECRET을 설정하세요. "
+            '(예: python -c "import secrets; print(secrets.token_hex(32))")'
+        )
+    logger.warning(
+        "JWT_SECRET이 기본값입니다. 개발용으로만 사용하고, 운영에서는 반드시 변경하세요."
+    )
+
+
+# 앱이 import되는 시점에 즉시 점검(운영이면 부팅 자체를 막아 위험한 구동을 차단).
+check_jwt_secret(JWT_SECRET, APP_ENV)
 # 토큰 유효기간(일). 지나면 다시 로그인해야 한다.
 JWT_EXPIRE_DAYS = 7
 

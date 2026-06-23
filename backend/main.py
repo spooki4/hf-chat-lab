@@ -25,16 +25,17 @@ FastAPI 백엔드 - HuggingFace 챗봇 (대화 기록 저장 + 멀티턴)
 
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -84,6 +85,21 @@ HISTORY_WINDOW = 10
 
 # 모델에게 주는 기본 지시(성격/규칙)
 SYSTEM_PROMPT = "You are a helpful assistant. 한국어로 친절하게 답하세요."
+
+# --- 입력 크기/형식 제한 (보안 가드) ----------------------------------------
+# 과도하게 큰 입력은 비용 폭증/DoS로 이어질 수 있어 길이 상한을 둔다.
+# 길이 상한은 DB 컬럼 크기와도 맞춰, 너무 긴 값이 DB까지 가서 깨지는 것을 막는다.
+MAX_MESSAGE_CHARS = 8000  # 한 번에 보낼 수 있는 메시지 길이
+MAX_EMAIL_CHARS = 255
+MAX_NAME_CHARS = 100
+MAX_PHONE_CHARS = 30
+MAX_PASSWORD_CHARS = 128
+MAX_TITLE_CHARS = 2000  # 실제 저장 시엔 컬럼 길이(255)로 다시 잘린다
+MAX_MODEL_CHARS = 255
+
+# 아주 단순한 이메일 형식 검사(@ 앞뒤로 공백 없는 토큰 + 점 포함 도메인).
+# 완벽한 RFC 검증은 아니지만 명백히 잘못된 값(공백/형식 깨짐)을 걸러내는 용도.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # HF의 모델 가용성은 수시로 바뀐다(provider가 빠지거나 모델 버전이 교체됨).
 # 그래서 드롭다운 목록을 하드코딩하지 않고, 라우터의 '실시간 목록'에서 가져온다.
@@ -191,9 +207,19 @@ def sync_admin_accounts():
 
 sync_admin_accounts()
 
+# CORS 허용 출처는 .env(ALLOWED_ORIGINS, 쉼표로 구분)로 설정한다.
+# 미설정이면 로컬 개발용 기본값(Vite dev 서버)을 쓴다.
+# (운영에서 다른 도메인으로 서빙한다면 그 도메인을 여기에 넣어야 한다)
+_DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", _DEFAULT_ORIGINS).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
     # 스트리밍 응답에서 대화 ID를 헤더로 내려주므로, 브라우저 JS가 읽을 수 있게 노출
@@ -201,13 +227,31 @@ app.add_middleware(
 )
 
 
+# 모든 응답에 공통 보안 헤더를 붙인다(클릭재킹/MIME 스니핑/레퍼러 누출 방지).
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    # 브라우저가 Content-Type을 멋대로 추측(스니핑)하지 못하게 함
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    # 다른 사이트가 iframe으로 끼워 넣지 못하게(클릭재킹 방지)
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    # 외부로 나갈 때 Referer에 우리 URL을 흘리지 않음
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    # 브라우저 기능(카메라/마이크/위치) 사용을 기본 차단
+    response.headers.setdefault(
+        "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+    )
+    return response
+
+
 # --- 요청/응답 스키마 ---------------------------------------------------------
 class ChatRequest(BaseModel):
-    message: str
+    # 빈 메시지 차단 + 과도한 길이 차단(비용/DoS 방지).
+    message: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
     # 이어서 대화할 대화방 ID. 없으면(None) 새 대화를 시작한다.
     conversation_id: int | None = None
     # 사용할 모델. 없으면 기본 모델(HF_MODEL) 사용.
-    model: str | None = None
+    model: str | None = Field(default=None, max_length=MAX_MODEL_CHARS)
 
 
 class ChatResponse(BaseModel):
@@ -219,7 +263,7 @@ class RegenerateRequest(BaseModel):
     # 어느 대화의 마지막 답변을 다시 만들지
     conversation_id: int
     # 재생성에 사용할 모델. 없으면 기본 모델 사용.
-    model: str | None = None
+    model: str | None = Field(default=None, max_length=MAX_MODEL_CHARS)
 
 
 class MessageOut(BaseModel):
@@ -245,20 +289,31 @@ class ConversationOut(BaseModel):
 
 
 class TitleUpdate(BaseModel):
-    title: str  # 사용자가 직접 입력한 새 제목
+    # 사용자가 직접 입력한 새 제목(저장 시 컬럼 길이로 다시 잘림).
+    title: str = Field(max_length=MAX_TITLE_CHARS)
+
+
+def _validate_email_format(v: str) -> str:
+    """이메일 형식이 명백히 잘못됐으면 거부한다(공용 validator)."""
+    if not _EMAIL_RE.match(v.strip()):
+        raise ValueError("이메일 형식이 올바르지 않습니다.")
+    return v
 
 
 # 회원가입/로그인 요청 본문
 class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    name: str
-    phone: str | None = None
+    email: str = Field(max_length=MAX_EMAIL_CHARS)
+    password: str = Field(max_length=MAX_PASSWORD_CHARS)
+    name: str = Field(max_length=MAX_NAME_CHARS)
+    phone: str | None = Field(default=None, max_length=MAX_PHONE_CHARS)
+
+    _check_email = field_validator("email")(_validate_email_format)
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    # 로그인은 형식까지 강제하지 않되(존재하지 않으면 어차피 401), 길이만 제한.
+    email: str = Field(max_length=MAX_EMAIL_CHARS)
+    password: str = Field(max_length=MAX_PASSWORD_CHARS)
 
 
 # 회원가입 결과(승인 대기 안내). 가입 직후에는 토큰을 주지 않는다.
@@ -307,11 +362,11 @@ class AdminUserUpdate(BaseModel):
 
 # 마이페이지: 내 정보 변경 요청 본문. 보낸 항목만 변경한다(부분 수정).
 class ProfileUpdate(BaseModel):
-    name: str | None = None
-    phone: str | None = None
+    name: str | None = Field(default=None, max_length=MAX_NAME_CHARS)
+    phone: str | None = Field(default=None, max_length=MAX_PHONE_CHARS)
     # 비밀번호 변경 시에만 사용(현재 비밀번호 확인 후 새 비밀번호로 교체)
-    current_password: str | None = None
-    new_password: str | None = None
+    current_password: str | None = Field(default=None, max_length=MAX_PASSWORD_CHARS)
+    new_password: str | None = Field(default=None, max_length=MAX_PASSWORD_CHARS)
 
 
 # --- 공용 헬퍼 ---------------------------------------------------------------

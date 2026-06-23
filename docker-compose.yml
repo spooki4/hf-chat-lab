@@ -47,6 +47,10 @@ services:
       HF_TOKEN: ${HF_TOKEN}
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_EMAILS: ${ADMIN_EMAILS}
+      # 운영 모드: JWT_SECRET이 비었거나 기본값이면 부팅을 막는 보안 가드가 켜진다.
+      APP_ENV: ${APP_ENV:-production}
+      # CORS 허용 출처(쉼표 구분). 단일 오리진(nginx /api 프록시)에선 보통 불필요.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       # (선택) 기본 모델 고정
       HF_MODEL: ${HF_MODEL:-}
     ports:
