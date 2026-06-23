@@ -1,0 +1,7 @@
+# 개발/테스트 전용 의존성. 운영 배포에는 필요 없고, 테스트를 돌릴 때만 설치한다.
+#   설치:  .venv/bin/pip install -r requirements-dev.txt
+#   실행:  .venv/bin/pytest
+-r requirements.txt
+
+# 테스트 러너
+pytest==8.3.4

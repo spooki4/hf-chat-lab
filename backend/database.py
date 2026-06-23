@@ -57,7 +57,15 @@ DATABASE_URL = build_database_url()
 # engine 생성.
 #   pool_pre_ping=True : 끊긴 커넥션을 자동 감지해 재연결(개발 중 끊김 방지)
 #   echo=False         : True로 바꾸면 실행되는 SQL이 콘솔에 찍힘(학습 시 유용)
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, echo=False)
+# SQLite(테스트/로컬용)는 기본적으로 '커넥션을 만든 스레드'에서만 쓸 수 있는데,
+# FastAPI는 여러 워커 스레드에서 같은 커넥션을 쓸 수 있으므로 그 제약을 끈다.
+# (MySQL 등 다른 DB에는 영향 없음)
+_connect_args = (
+    {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+)
+engine = create_engine(
+    DATABASE_URL, pool_pre_ping=True, echo=False, connect_args=_connect_args
+)
 
 # 요청 처리마다 하나씩 만들어 쓸 Session 공장(factory)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
