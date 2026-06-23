@@ -1,0 +1,10 @@
+# 이미지에 넣을 필요 없는 것들 (빌드 컨텍스트 축소 + 비밀값 유출 방지)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+.env
+*.env
+!*.env.example
+.DS_Store

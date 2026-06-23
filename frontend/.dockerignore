@@ -1,0 +1,9 @@
+# 빌드 컨텍스트에서 제외할 것들.
+node_modules/
+dist/
+.vite/
+# .env 를 제외해야 Dockerfile의 ARG/ENV(VITE_API_URL=/api)가 그대로 적용된다.
+.env
+*.env
+!*.env.example
+.DS_Store

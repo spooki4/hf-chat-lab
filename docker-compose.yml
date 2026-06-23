@@ -1,0 +1,70 @@
+# hf-chat-lab 풀스택 실행 (DB + 백엔드 + 프론트).
+#
+# 사용법:
+#   1) cp .env.example .env  후 값 채우기 (HF_TOKEN, JWT_SECRET, ADMIN_EMAILS, 비밀번호)
+#   2) docker compose up -d --build
+#   3) 브라우저에서 http://localhost:8080 접속
+#
+# 구성:
+#   db       MySQL 8 (데이터는 named volume에 영속)
+#   backend  FastAPI (db가 '정상'이 된 뒤 시작)
+#   frontend nginx (정적 빌드 서빙 + /api → backend 프록시)
+
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${DB_NAME:-hf_chat_lab}
+      MYSQL_USER: ${DB_USER:-hfchat}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-hfchatpass}
+    volumes:
+      # 컨테이너를 내려도 DB 데이터가 유지되도록 named volume에 저장.
+      - db_data:/var/lib/mysql
+    healthcheck:
+      # 127.0.0.1(TCP)로 접속이 되면 초기화가 끝나 '진짜로 준비된' 상태.
+      # (초기화 중에는 소켓 전용 임시 서버라 TCP 접속이 안 되므로 race 방지)
+      test: ["CMD-SHELL", "mysql -h127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD -e 'SELECT 1' >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy  # DB가 준비된 뒤에 시작(시작 시 마이그레이션 실행)
+    environment:
+      # DB 접속 정보 (database.py가 DB_* 로 연결 문자열을 조립)
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: ${DB_USER:-hfchat}
+      DB_PASSWORD: ${DB_PASSWORD:-hfchatpass}
+      DB_NAME: ${DB_NAME:-hf_chat_lab}
+      # 비밀값 (.env에서 주입)
+      HF_TOKEN: ${HF_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_EMAILS: ${ADMIN_EMAILS}
+      # (선택) 기본 모델 고정
+      HF_MODEL: ${HF_MODEL:-}
+    ports:
+      # 직접 API 디버깅/호출용으로 호스트에 노출(앱은 프론트의 /api 프록시를 사용).
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # 같은 오리진에서 nginx가 백엔드로 프록시하므로 상대경로 "/api"를 쓴다.
+        VITE_API_URL: /api
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  db_data:
