@@ -145,3 +145,43 @@
   color: #137a47;
   font-size: 0.83rem;
 }
+
+/* ===== 모바일 반응형 ===== */
+@media (max-width: 768px) {
+  /* 좌우 배치 → 위아래 배치(메뉴가 상단 바로) */
+  .mypage {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .mypage-nav {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    padding: 12px 14px;
+  }
+
+  .mypage-nav-top {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 10px;
+    flex: 1;
+  }
+
+  /* 메뉴 항목은 가로로 늘어놓는다(넘치면 줄바꿈) */
+  .mypage-menu {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .mypage-content {
+    padding: 18px 16px;
+  }
+
+  .profile-card {
+    max-width: 100%;
+  }
+}

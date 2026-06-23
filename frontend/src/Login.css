@@ -89,3 +89,15 @@
   padding: 0;
   text-decoration: underline;
 }
+
+/* ===== 모바일 반응형 ===== */
+@media (max-width: 480px) {
+  .login-page {
+    padding: 16px;
+  }
+  /* 고정 폭 대신 화면 폭에 맞춤(작은 화면에서 잘리지 않게) */
+  .login-card {
+    width: 100%;
+    max-width: 360px;
+  }
+}

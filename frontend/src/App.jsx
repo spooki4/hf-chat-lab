@@ -49,6 +49,15 @@ function formatConvoTime(iso) {
 // 로그인 토큰을 브라우저에 저장할 때 쓰는 key (새로고침해도 로그인 유지)
 const TOKEN_KEY = "hf_chat_token";
 
+// 맥이면 ⌘(Command), 그 외(윈도우/리눅스)면 Ctrl 키로 전송하도록 안내 문구를 바꾼다.
+const IS_MAC =
+  typeof navigator !== "undefined" &&
+  /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent || "");
+// 입력창 아래에 보여줄 단축키 안내 (처음 쓰는 사용자를 위한 작은 설명)
+const SUBMIT_HINT = IS_MAC
+  ? "⌘ + Enter 전송 · Enter 줄바꿈"
+  : "Ctrl + Enter 전송 · Enter 줄바꿈";
+
 export default function App() {
   // token: 로그인 토큰(JWT). 없으면 로그인 화면을 보여준다. (localStorage에서 초기화)
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
@@ -78,15 +87,29 @@ export default function App() {
   const [search, setSearch] = useState("");
   // modelPickerOpen: 모델 선택 모달 표시 여부
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  // sidebarOpen: (모바일) 대화 목록 사이드바를 열었는지. 데스크톱에선 항상 보이므로 무관.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // 페이지 이동용(관리자 페이지 등)
   const navigate = useNavigate();
+
+  // 입력창(textarea) DOM 참조 — 입력 내용에 맞춰 높이를 자동 조절하는 데 사용
+  const inputRef = useRef(null);
 
   // 새 메시지가 추가되면 맨 아래로 스크롤
   const bottomRef = useRef(null);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // 입력 내용에 맞춰 textarea 높이를 자동으로 늘렸다 줄인다(최대 높이까지).
+  // 전송 후 input이 ""로 비워지면 다시 한 줄 높이로 돌아온다.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto"; // 먼저 줄였다가
+    el.style.height = Math.min(el.scrollHeight, 160) + "px"; // 내용 높이만큼(최대 160px)
+  }, [input]);
 
   // 로그인 상태(token)가 생기면: 토큰 유효성 확인 + 대화/모델 목록 로드.
   // (새로고침으로 localStorage 토큰만 남아있는 경우에도 여기서 검증한다)
@@ -173,6 +196,7 @@ export default function App() {
   // 사이드바에서 대화를 클릭하면 그 대화의 메시지를 불러온다.
   async function selectConversation(id) {
     setActiveId(id);
+    setSidebarOpen(false); // (모바일) 대화를 고르면 사이드바를 닫는다
     try {
       const res = await apiFetch(`/conversations/${id}/messages`);
       setMessages(await res.json());
@@ -186,6 +210,7 @@ export default function App() {
     setActiveId(null);
     setMessages([]);
     setInput("");
+    setSidebarOpen(false); // (모바일) 새 대화를 시작하면 사이드바를 닫는다
   }
 
   // 새 대화의 제목을 모델로 자동 생성하고, 끝나면 사이드바를 갱신한다.
@@ -324,6 +349,16 @@ export default function App() {
     }
   }
 
+  // 입력창 키 처리:
+  //   ⌘/Ctrl + Enter → 전송 (PC에서 Enter만으로 실수 전송되는 불편 해소)
+  //   그냥 Enter      → 줄바꿈 (textarea 기본 동작 그대로)
+  function onInputKeyDown(e) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      sendMessage(e);
+    }
+  }
+
   // --- 메시지 복사 -----------------------------------------------------------
   // 봇 응답 원문(마크다운 그대로)을 클립보드에 복사하고, 잠깐 '복사됨 ✓'을 보여준다.
   async function copyMessage(content, index) {
@@ -409,8 +444,16 @@ export default function App() {
   // 채팅 화면(라우트 "/"). 아래 Routes에서 다른 페이지와 함께 분기한다.
   const chatScreen = (
     <div className="app">
-      {/* 왼쪽: 대화 목록 사이드바 */}
-      <aside className="sidebar">
+      {/* (모바일) 사이드바가 열렸을 때 뒤를 덮는 반투명 배경 — 누르면 닫힌다 */}
+      {sidebarOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* 왼쪽: 대화 목록 사이드바 (모바일에선 슬라이드로 열고 닫는다) */}
+      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
         <button className="new-chat" onClick={startNewChat}>
           + 새 대화
         </button>
@@ -525,6 +568,15 @@ export default function App() {
       {/* 오른쪽: 채팅 영역 */}
       <main className="chat-container">
         <header className="chat-header">
+          {/* (모바일 전용) 대화 목록 열기 버튼 */}
+          <button
+            className="sidebar-toggle"
+            onClick={() => setSidebarOpen(true)}
+            title="대화 목록 열기"
+            aria-label="대화 목록 열기"
+          >
+            ☰
+          </button>
           <h1>🤗 HF Chat Lab</h1>
           {/* 모델 선택: 버튼을 누르면 검색 가능한 모달이 열린다(모델이 많아서) */}
           <button
@@ -606,17 +658,23 @@ export default function App() {
           <div ref={bottomRef} />
         </div>
 
-        <form className="input-row" onSubmit={sendMessage}>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="메시지를 입력하세요…"
-            disabled={loading}
-          />
-          <button type="submit" disabled={loading || !input.trim()}>
-            전송
-          </button>
+        <form className="composer" onSubmit={sendMessage}>
+          <div className="input-row">
+            <textarea
+              ref={inputRef}
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onInputKeyDown}
+              placeholder="메시지를 입력하세요…"
+              disabled={loading}
+            />
+            <button type="submit" disabled={loading || !input.trim()}>
+              전송
+            </button>
+          </div>
+          {/* 처음 쓰는 사용자를 위한 단축키 안내 (OS에 맞춰 ⌘ 또는 Ctrl 표시) */}
+          <div className="input-hint">{SUBMIT_HINT}</div>
         </form>
       </main>
 
